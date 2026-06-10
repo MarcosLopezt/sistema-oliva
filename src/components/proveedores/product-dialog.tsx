@@ -58,6 +58,7 @@ function ProductForm({
 
   const [name, setName] = useState(product?.name ?? "");
   const [code, setCode] = useState(product?.code ?? "");
+  const [saleUnit, setSaleUnit] = useState(product?.sale_unit ?? "");
   const [baseUnit, setBaseUnit] = useState<UnitKind>(product?.base_unit ?? "kg");
   const [packSize, setPackSize] = useState(String(product?.pack_size ?? 1));
   const [price, setPrice] = useState(String(product?.price ?? 0));
@@ -84,6 +85,7 @@ function ProductForm({
       provider_id: providerId,
       name: name.trim(),
       code: code.trim() || null,
+      sale_unit: saleUnit.trim() || null,
       base_unit: baseUnit,
       pack_size: pack,
       price: pr,
@@ -134,6 +136,17 @@ function ProductForm({
             />
           </div>
           <div className="flex flex-col gap-2">
+            <Label htmlFor="prod-sale-unit">Unidad de venta (opcional)</Label>
+            <Input
+              id="prod-sale-unit"
+              value={saleUnit}
+              onChange={(e) => setSaleUnit(e.target.value)}
+              placeholder="Ej: caja, bolsa, docena"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="prod-unit">Unidad base</Label>
             <NativeSelect
               id="prod-unit"
@@ -147,8 +160,6 @@ function ProductForm({
               ))}
             </NativeSelect>
           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-2">
             <Label htmlFor="prod-pack">Tamaño del pack</Label>
             <Input
@@ -158,15 +169,15 @@ function ProductForm({
               onChange={(e) => setPackSize(e.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="prod-price">Precio (por pack)</Label>
-            <Input
-              id="prod-price"
-              inputMode="decimal"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-            />
-          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="prod-price">Precio (por pack)</Label>
+          <Input
+            id="prod-price"
+            inputMode="decimal"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input

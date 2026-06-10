@@ -96,6 +96,7 @@ export default function ProveedoresPage() {
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       <Button
+                        nativeButton={false}
                         render={<Link href={`/proveedores/${p.id}`} />}
                         variant="outline"
                         size="sm"

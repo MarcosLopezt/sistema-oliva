@@ -26,7 +26,7 @@ import { ProductDialog } from "@/components/proveedores/product-dialog";
 import { ExcelImportDialog } from "@/components/proveedores/excel-import-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useProviders, useProducts, useDeleteProduct } from "@/lib/hooks";
-import { formatARS, formatDate, pricePerBaseUnit, unitLabel } from "@/lib/format";
+import { formatARS, formatDate, formatNum, pricePerBaseUnit, unitLabel } from "@/lib/format";
 import type { Product } from "@/lib/types";
 
 export default function ProviderProductsPage() {
@@ -125,9 +125,13 @@ export default function ProviderProductsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{unitLabel(p.base_unit)}</Badge>
+                    <Badge variant="secondary">
+                      {p.sale_unit?.trim() || unitLabel(p.base_unit)}
+                    </Badge>
                   </TableCell>
-                  <TableCell className="text-right">{p.pack_size}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatNum(p.pack_size)} {unitLabel(p.base_unit)}
+                  </TableCell>
                   <TableCell className="text-right">
                     {formatARS(p.price)}
                     {p.price_includes_iva && (
@@ -136,8 +140,8 @@ export default function ProviderProductsPage() {
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {formatARS(pricePerBaseUnit(p.price, p.pack_size))}
+                  <TableCell className="text-right text-muted-foreground tabular-nums">
+                    {formatARS(pricePerBaseUnit(p.price, p.pack_size))} / {unitLabel(p.base_unit)}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatDate(p.updated_at)}

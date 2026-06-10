@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { CheckCircle2, TriangleAlert, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,15 +26,20 @@ import {
 import {
   readWorkbook,
   guessHeaderRow,
-  parseUnit,
+  parseContent,
   parsePrice,
+  autoMapProductColumns,
+  NO_COLUMN,
   type SheetGrid,
+  type ProductField,
 } from "@/lib/excel";
 import { useBulkInsertProducts } from "@/lib/hooks";
 import { UNITS, type ProductInput, type UnitKind } from "@/lib/types";
-import { formatARS } from "@/lib/format";
+import { formatARS, formatNum, unitLabel } from "@/lib/format";
 
 const NONE = "-1";
+
+type ParsedRow = { input: ProductInput; usedFallback: boolean };
 
 export function ExcelImportDialog({
   open,
@@ -48,22 +54,33 @@ export function ExcelImportDialog({
   const [grid, setGrid] = useState<SheetGrid | null>(null);
   const [sheet, setSheet] = useState("");
   const [headerRow, setHeaderRow] = useState(0);
-  const [colName, setColName] = useState(NONE);
-  const [colPrice, setColPrice] = useState(NONE);
-  const [colCode, setColCode] = useState(NONE);
-  const [colUnit, setColUnit] = useState(NONE);
-  const [defaultUnit, setDefaultUnit] = useState<UnitKind>("kg");
-  const [defaultPack, setDefaultPack] = useState("1");
+  const [cols, setCols] = useState<Record<ProductField, string>>({
+    name: NONE,
+    price: NONE,
+    saleUnit: NONE,
+    content: NONE,
+    code: NONE,
+  });
+  const [defaultUnit, setDefaultUnit] = useState<UnitKind>("un");
   const [iva, setIva] = useState(false);
 
   function reset() {
     setGrid(null);
     setSheet("");
     setHeaderRow(0);
-    setColName(NONE);
-    setColPrice(NONE);
-    setColCode(NONE);
-    setColUnit(NONE);
+    setCols({ name: NONE, price: NONE, saleUnit: NONE, content: NONE, code: NONE });
+  }
+
+  function autoMap(header: string[]) {
+    const m = autoMapProductColumns(header);
+    const toStr = (i: number) => (i === NO_COLUMN ? NONE : String(i));
+    setCols({
+      name: toStr(m.name),
+      price: toStr(m.price),
+      saleUnit: toStr(m.saleUnit),
+      content: toStr(m.content),
+      code: toStr(m.code),
+    });
   }
 
   async function handleFile(file: File) {
@@ -83,19 +100,6 @@ export function ExcelImportDialog({
     }
   }
 
-  function autoMap(header: string[]) {
-    const find = (re: RegExp) =>
-      String(header.findIndex((h) => re.test(h.toLowerCase())));
-    const n = find(/nombre|producto|descrip/);
-    const p = find(/precio|importe|valor/);
-    const c = find(/c[oó]digo|cod\b|sku/);
-    const u = find(/unidad|medida|u\.?m\.?/);
-    setColName(n === "-1" ? NONE : n);
-    setColPrice(p === "-1" ? NONE : p);
-    setColCode(c === "-1" ? NONE : c);
-    setColUnit(u === "-1" ? NONE : u);
-  }
-
   const rows = useMemo(
     () => (grid && sheet ? grid.rows(sheet) : []),
     [grid, sheet],
@@ -107,45 +111,57 @@ export function ExcelImportDialog({
     label: header[i]?.trim() || `Columna ${i + 1}`,
   }));
 
-  const parsed: ProductInput[] = useMemo(() => {
-    if (!rows.length || colName === NONE || colPrice === NONE) return [];
-    const ni = Number(colName);
-    const pi = Number(colPrice);
-    const ci = colCode === NONE ? -1 : Number(colCode);
-    const ui = colUnit === NONE ? -1 : Number(colUnit);
-    const pack = Number(defaultPack.replace(",", ".")) || 1;
-    const out: ProductInput[] = [];
+  const idx = (key: ProductField) =>
+    cols[key] === NONE ? NO_COLUMN : Number(cols[key]);
+
+  const parsed: ParsedRow[] = useMemo(() => {
+    const ni = idx("name");
+    const pi = idx("price");
+    if (!rows.length || ni === NO_COLUMN || pi === NO_COLUMN) return [];
+    const si = idx("saleUnit");
+    const cti = idx("content");
+    const codi = idx("code");
+    const out: ParsedRow[] = [];
     for (let i = headerRow + 1; i < rows.length; i++) {
       const r = rows[i];
       const name = (r[ni] ?? "").trim();
-      if (!name) continue;
+      if (!name) continue; // fila vacía o sin producto → se ignora
       const price = parsePrice(r[pi] ?? "");
       if (Number.isNaN(price)) continue;
-      const unit =
-        ui >= 0 ? (parseUnit(r[ui] ?? "") ?? defaultUnit) : defaultUnit;
+
+      const saleUnit = si >= 0 ? (r[si] || "").trim() : "";
+      let baseUnit: UnitKind = defaultUnit;
+      let packSize = 1;
+      let usedFallback = true;
+      if (cti >= 0) {
+        const c = parseContent(r[cti] ?? "");
+        if (c) {
+          baseUnit = c.baseUnit;
+          packSize = c.packSize;
+          usedFallback = false;
+        }
+      }
       out.push({
-        provider_id: providerId,
-        name,
-        code: ci >= 0 ? (r[ci] || "").trim() || null : null,
-        base_unit: unit,
-        pack_size: pack,
-        price,
-        price_includes_iva: iva,
+        usedFallback,
+        input: {
+          provider_id: providerId,
+          name,
+          code: codi >= 0 ? (r[codi] || "").trim() || null : null,
+          base_unit: baseUnit,
+          pack_size: packSize,
+          price,
+          sale_unit: saleUnit || null,
+          price_includes_iva: iva,
+        },
       });
     }
     return out;
-  }, [
-    rows,
-    headerRow,
-    colName,
-    colPrice,
-    colCode,
-    colUnit,
-    defaultUnit,
-    defaultPack,
-    iva,
-    providerId,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, headerRow, cols, defaultUnit, iva, providerId]);
+
+  const missingRequired = idx("name") === NO_COLUMN || idx("price") === NO_COLUMN;
+  const noContent = idx("content") === NO_COLUMN;
+  const fallbackCount = parsed.filter((p) => p.usedFallback).length;
 
   async function handleImport() {
     if (parsed.length === 0) {
@@ -153,7 +169,7 @@ export function ExcelImportDialog({
       return;
     }
     try {
-      const n = await bulk.mutateAsync(parsed);
+      const n = await bulk.mutateAsync(parsed.map((p) => p.input));
       toast.success(`${n} productos importados.`);
       reset();
       onOpenChange(false);
@@ -175,8 +191,8 @@ export function ExcelImportDialog({
         <DialogHeader>
           <DialogTitle>Importar lista de precios (Excel)</DialogTitle>
           <DialogDescription>
-            Subí el .xlsx/.xls/.csv del proveedor y asociá las columnas. Revisá la
-            vista previa antes de importar.
+            Subí el .xlsx/.xls/.csv del proveedor. Detectamos las columnas por su
+            encabezado; revisá el mapeo y la vista previa antes de importar.
           </DialogDescription>
         </DialogHeader>
 
@@ -192,9 +208,35 @@ export function ExcelImportDialog({
                 if (f) handleFile(f);
               }}
             />
+            <p className="text-xs text-muted-foreground">
+              Columnas que reconocemos (en cualquier orden): producto/descripción ·
+              precio/costo · unidad de venta/presentación · cantidad por
+              unidad/contenido · código.
+            </p>
           </div>
         ) : (
           <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1">
+            {/* Estado del mapeo automático */}
+            {missingRequired ? (
+              <Banner
+                tone="error"
+                icon={<CircleAlert className="size-4" />}
+                text="No detectamos Producto y/o Precio. Asignalos manualmente abajo."
+              />
+            ) : noContent ? (
+              <Banner
+                tone="warn"
+                icon={<TriangleAlert className="size-4" />}
+                text="No detectamos la columna de cantidad/contenido. Asignala para calcular el costo por unidad, o elegí abajo una unidad por defecto."
+              />
+            ) : (
+              <Banner
+                tone="ok"
+                icon={<CheckCircle2 className="size-4" />}
+                text="Columnas detectadas automáticamente. Revisá la vista previa."
+              />
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Hoja</Label>
@@ -230,16 +272,18 @@ export function ExcelImportDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Mapping label="Nombre *" value={colName} onChange={setColName} options={colOptions} />
-              <Mapping label="Precio *" value={colPrice} onChange={setColPrice} options={colOptions} />
-              <Mapping label="Código" value={colCode} onChange={setColCode} options={colOptions} optional />
-              <Mapping label="Unidad" value={colUnit} onChange={setColUnit} options={colOptions} optional />
+            {/* Mapeo manual (fallback): siempre visible, ya pre-cargado */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <Mapping label="Producto *" value={cols.name} onChange={(v) => setCols((c) => ({ ...c, name: v }))} options={colOptions} />
+              <Mapping label="Precio *" value={cols.price} onChange={(v) => setCols((c) => ({ ...c, price: v }))} options={colOptions} />
+              <Mapping label="Unidad de venta" value={cols.saleUnit} onChange={(v) => setCols((c) => ({ ...c, saleUnit: v }))} options={colOptions} optional />
+              <Mapping label="Cant. por unidad" value={cols.content} onChange={(v) => setCols((c) => ({ ...c, content: v }))} options={colOptions} optional />
+              <Mapping label="Código" value={cols.code} onChange={(v) => setCols((c) => ({ ...c, code: v }))} options={colOptions} optional />
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
-                <Label>Unidad por defecto</Label>
+                <Label>Unidad por defecto (si falta el contenido)</Label>
                 <NativeSelect
                   value={defaultUnit}
                   onChange={(e) => setDefaultUnit(e.target.value as UnitKind)}
@@ -250,15 +294,6 @@ export function ExcelImportDialog({
                     </option>
                   ))}
                 </NativeSelect>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="def-pack">Pack por defecto</Label>
-                <Input
-                  id="def-pack"
-                  inputMode="decimal"
-                  value={defaultPack}
-                  onChange={(e) => setDefaultPack(e.target.value)}
-                />
               </div>
               <label className="mt-6 flex items-center gap-2 text-sm">
                 <input
@@ -271,37 +306,57 @@ export function ExcelImportDialog({
               </label>
             </div>
 
-            <div>
-              <p className="mb-2 text-sm font-medium">
-                Vista previa — {parsed.length} productos detectados
-              </p>
-              <div className="overflow-hidden rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nombre</TableHead>
-                      <TableHead>Unidad</TableHead>
-                      <TableHead className="text-right">Pack</TableHead>
-                      <TableHead className="text-right">Precio</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {parsed.slice(0, 8).map((p, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="max-w-[280px] truncate">
-                          {p.name}
-                        </TableCell>
-                        <TableCell>{p.base_unit}</TableCell>
-                        <TableCell className="text-right">{p.pack_size}</TableCell>
-                        <TableCell className="text-right">
-                          {formatARS(p.price)}
-                        </TableCell>
+            {!missingRequired && (
+              <div>
+                <p className="mb-2 text-sm font-medium">
+                  Vista previa — {parsed.length} productos
+                  {fallbackCount > 0 && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-amber-600">
+                      <TriangleAlert className="size-3.5" />
+                      {fallbackCount} sin contenido (unidad por defecto: {defaultUnit}, pack 1)
+                    </span>
+                  )}
+                </p>
+                <div className="overflow-hidden rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Producto</TableHead>
+                        <TableHead>Unidad de venta</TableHead>
+                        <TableHead className="text-right">Pack</TableHead>
+                        <TableHead className="text-right">Precio</TableHead>
+                        <TableHead className="text-right">$/unidad</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {parsed.slice(0, 8).map((p, i) => {
+                        const { input } = p;
+                        const u = unitLabel(input.base_unit);
+                        return (
+                          <TableRow key={i}>
+                            <TableCell className="max-w-[220px] truncate">
+                              {input.name}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {input.sale_unit || u}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {formatNum(input.pack_size)} {u}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {formatARS(input.price)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {formatARS(input.price / input.pack_size)} / {u}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -310,15 +365,39 @@ export function ExcelImportDialog({
             Cancelar
           </Button>
           {grid && (
-            <Button onClick={handleImport} disabled={bulk.isPending}>
-              {bulk.isPending
-                ? "Importando…"
-                : `Importar ${parsed.length} productos`}
+            <Button
+              onClick={handleImport}
+              disabled={bulk.isPending || missingRequired || parsed.length === 0}
+            >
+              {bulk.isPending ? "Importando…" : `Importar ${parsed.length} productos`}
             </Button>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function Banner({
+  tone,
+  icon,
+  text,
+}: {
+  tone: "ok" | "warn" | "error";
+  icon: React.ReactNode;
+  text: string;
+}) {
+  const cls =
+    tone === "ok"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20"
+      : tone === "warn"
+        ? "border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-950/20"
+        : "border-destructive/40 bg-destructive/10 text-destructive";
+  return (
+    <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${cls}`}>
+      {icon}
+      <span>{text}</span>
+    </div>
   );
 }
 
@@ -337,10 +416,9 @@ function Mapping({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
+      <Label className="text-xs">{label}</Label>
       <NativeSelect value={value} onChange={(e) => onChange(e.target.value)}>
-        {optional && <option value={NONE}>— (ninguna)</option>}
-        {!optional && <option value={NONE}>— elegí columna —</option>}
+        <option value={NONE}>{optional ? "— (ninguna)" : "— elegí columna —"}</option>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
