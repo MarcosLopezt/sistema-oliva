@@ -1,4 +1,5 @@
 import { convert } from "@/lib/cost";
+import { formatNum, formatDate } from "@/lib/format";
 import type {
   EventRow,
   EventRecipeWithRecipe,
@@ -58,11 +59,24 @@ export type MPLine = {
   /** Cantidad a comprar (packs si hay producto; cantidad en unidad base si es mercado). */
   buyQty: number;
   buyUnitLabel: string;
+  /** Cantidad total en la unidad base del producto (packs × pack_size). */
+  totalBaseQty: number;
+  baseUnitLabel: string;
+  /** Etiqueta de la unidad de venta del proveedor (ej "caja", "bidón"), si existe. */
+  saleUnit: string | null;
   priceEach: number;
   subtotal: number;
 };
 
-export type MPGroup = { provider: string; lines: MPLine[]; subtotal: number };
+export type MPGroup = {
+  provider: string;
+  /** id del proveedor (null para el grupo "Precio de mercado"). */
+  providerId: string | null;
+  /** Teléfono / WhatsApp del proveedor, si está cargado. */
+  phone: string | null;
+  lines: MPLine[];
+  subtotal: number;
+};
 
 export type MPProblem = { ingredientName: string; reason: string };
 
@@ -119,11 +133,22 @@ export function computeMateriaPrima(
   }
 
   // 2) Convertir necesidades en líneas de compra agrupadas por proveedor.
-  const groupMap = new Map<string, MPLine[]>();
-  const addLine = (provider: string, line: MPLine) => {
-    const arr = groupMap.get(provider);
-    if (arr) arr.push(line);
-    else groupMap.set(provider, [line]);
+  //    La clave del grupo es el id del proveedor (o el sentinel MERCADO).
+  type GroupAcc = {
+    provider: string;
+    providerId: string | null;
+    phone: string | null;
+    lines: MPLine[];
+  };
+  const groupMap = new Map<string, GroupAcc>();
+  const addLine = (
+    key: string,
+    meta: Omit<GroupAcc, "lines">,
+    line: MPLine,
+  ) => {
+    const g = groupMap.get(key);
+    if (g) g.lines.push(line);
+    else groupMap.set(key, { ...meta, lines: [line] });
   };
 
   for (const { ingredient: ing, baseQty } of needs.values()) {
@@ -139,41 +164,64 @@ export function computeMateriaPrima(
       const neededProductUnits = baseQty * factor;
       const packs = Math.max(1, Math.ceil(neededProductUnits / ing.product.pack_size));
       const subtotal = packs * ing.product.price;
-      addLine(ing.product.provider?.name ?? "Sin proveedor", {
-        ingredientId: ing.id,
-        ingredientName: ing.name,
-        productName: ing.product.name,
-        buyQty: packs,
-        buyUnitLabel:
-          ing.product.pack_size === 1
-            ? unitLbl(ing.product.base_unit)
-            : `pack ${ing.product.pack_size} ${unitLbl(ing.product.base_unit)}`,
-        priceEach: ing.product.price,
-        subtotal,
-      });
+      const provider = ing.product.provider;
+      const baseUnitLabel = unitLbl(ing.product.base_unit);
+      addLine(
+        provider?.id ?? "sin-proveedor",
+        {
+          provider: provider?.name ?? "Sin proveedor",
+          providerId: provider?.id ?? null,
+          phone: provider?.phone ?? null,
+        },
+        {
+          ingredientId: ing.id,
+          ingredientName: ing.name,
+          productName: ing.product.name,
+          buyQty: packs,
+          buyUnitLabel:
+            ing.product.pack_size === 1
+              ? baseUnitLabel
+              : `pack ${ing.product.pack_size} ${baseUnitLabel}`,
+          totalBaseQty: packs * ing.product.pack_size,
+          baseUnitLabel,
+          saleUnit: ing.product.sale_unit ?? null,
+          priceEach: ing.product.price,
+          subtotal,
+        },
+      );
     } else if (ing.market_price != null) {
       const subtotal = baseQty * ing.market_price;
-      addLine(MERCADO, {
-        ingredientId: ing.id,
-        ingredientName: ing.name,
-        productName: null,
-        buyQty: Math.round(baseQty * 1000) / 1000,
-        buyUnitLabel: unitLbl(ing.base_unit),
-        priceEach: ing.market_price,
-        subtotal,
-      });
+      const baseUnitLabel = unitLbl(ing.base_unit);
+      addLine(
+        MERCADO,
+        { provider: MERCADO, providerId: null, phone: null },
+        {
+          ingredientId: ing.id,
+          ingredientName: ing.name,
+          productName: null,
+          buyQty: Math.round(baseQty * 1000) / 1000,
+          buyUnitLabel: baseUnitLabel,
+          totalBaseQty: Math.round(baseQty * 1000) / 1000,
+          baseUnitLabel,
+          saleUnit: null,
+          priceEach: ing.market_price,
+          subtotal,
+        },
+      );
     } else {
       problems.push({ ingredientName: ing.name, reason: "sin precio cargado" });
     }
   }
 
-  const groups: MPGroup[] = [...groupMap.entries()]
-    .map(([provider, lines]) => ({
-      provider,
-      lines: lines.sort((a, b) =>
+  const groups: MPGroup[] = [...groupMap.values()]
+    .map((g) => ({
+      provider: g.provider,
+      providerId: g.providerId,
+      phone: g.phone,
+      lines: g.lines.sort((a, b) =>
         a.ingredientName.localeCompare(b.ingredientName),
       ),
-      subtotal: lines.reduce((s, l) => s + l.subtotal, 0),
+      subtotal: g.lines.reduce((s, l) => s + l.subtotal, 0),
     }))
     .sort((a, b) => a.provider.localeCompare(b.provider));
 
@@ -181,4 +229,40 @@ export function computeMateriaPrima(
   const perPerson = event.pax > 0 ? total / event.pax : 0;
 
   return { groups, problems, total, perPerson };
+}
+
+/**
+ * Arma el texto del pedido para un proveedor, listo para copiar/compartir.
+ * Cantidades definitivas: ya vienen con merma y redondeo a la unidad de venta.
+ */
+export function buildProviderOrderMessage(
+  eventName: string,
+  eventDate: string | null,
+  group: MPGroup,
+): string {
+  const lines = group.lines.map((l) => {
+    // Unidad de venta del proveedor: ej "2 caja" / "3 pack 5 kg".
+    const saleLabel = l.saleUnit ?? l.buyUnitLabel;
+    const packs = `${formatNum(l.buyQty)} ${saleLabel}`;
+    const total = `${formatNum(l.totalBaseQty)} ${l.baseUnitLabel}`;
+    return `- ${l.ingredientName}: ${total} (${packs})`;
+  });
+
+  const dateStr = eventDate ? ` del ${formatDate(eventDate)}` : "";
+  return [
+    `Hola ${group.provider},`,
+    `Te paso el pedido para el evento "${eventName}"${dateStr}:`,
+    "",
+    ...lines,
+    "",
+    "Quedamos en contacto. Saludos,",
+    "Oliva Gastronomía",
+  ].join("\n");
+}
+
+/** Normaliza un teléfono a solo dígitos para armar el link de wa.me. */
+export function whatsappDigits(phone: string | null): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 6 ? digits : null;
 }

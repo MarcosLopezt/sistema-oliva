@@ -28,6 +28,9 @@ import {
   guessHeaderRow,
   parseContent,
   parsePrice,
+  parsePresentation,
+  presentationToContent,
+  contentFromName,
   autoMapProductColumns,
   NO_COLUMN,
   type SheetGrid,
@@ -39,7 +42,33 @@ import { formatARS, formatNum, unitLabel } from "@/lib/format";
 
 const NONE = "-1";
 
-type ParsedRow = { input: ProductInput; usedFallback: boolean };
+type RowStatus = "ok" | "fallback" | "review";
+
+/** Fila analizada: valores sugeridos + estado + texto de presentación original. */
+type Analyzed = {
+  rowIndex: number;
+  name: string;
+  code: string | null;
+  price: number;
+  saleUnit: string | null;
+  baseUnit: UnitKind;
+  packSize: number;
+  status: RowStatus;
+  /** Texto original de presentación (solo en filas a revisar). */
+  presentationRaw: string | null;
+  /** Cantidad sugerida por el parser para precargar la revisión. */
+  suggestedQty: number | null;
+};
+
+/** Convierte cantidad + unidad a {baseUnit, packSize} normalizando kg→g, L→ml. */
+function qtyUnitToContent(
+  qty: number,
+  unit: UnitKind,
+): { baseUnit: UnitKind; packSize: number } {
+  if (unit === "kg") return { baseUnit: "g", packSize: qty * 1000 };
+  if (unit === "l") return { baseUnit: "ml", packSize: qty * 1000 };
+  return { baseUnit: unit, packSize: qty };
+}
 
 export function ExcelImportDialog({
   open,
@@ -59,16 +88,25 @@ export function ExcelImportDialog({
     price: NONE,
     saleUnit: NONE,
     content: NONE,
+    presentation: NONE,
     code: NONE,
   });
   const [defaultUnit, setDefaultUnit] = useState<UnitKind>("un");
   const [iva, setIva] = useState(false);
+  // Ediciones manuales de las filas a revisar (clave = índice de fila).
+  const [reviewEdits, setReviewEdits] = useState<
+    Record<number, { qty: string; unit: UnitKind }>
+  >({});
 
   function reset() {
     setGrid(null);
     setSheet("");
     setHeaderRow(0);
-    setCols({ name: NONE, price: NONE, saleUnit: NONE, content: NONE, code: NONE });
+    setCols({
+      name: NONE, price: NONE, saleUnit: NONE, content: NONE,
+      presentation: NONE, code: NONE,
+    });
+    setReviewEdits({});
   }
 
   function autoMap(header: string[]) {
@@ -79,8 +117,10 @@ export function ExcelImportDialog({
       price: toStr(m.price),
       saleUnit: toStr(m.saleUnit),
       content: toStr(m.content),
+      presentation: toStr(m.presentation),
       code: toStr(m.code),
     });
+    setReviewEdits({});
   }
 
   async function handleFile(file: File) {
@@ -114,63 +154,125 @@ export function ExcelImportDialog({
   const idx = (key: ProductField) =>
     cols[key] === NONE ? NO_COLUMN : Number(cols[key]);
 
-  const parsed: ParsedRow[] = useMemo(() => {
+  // Analiza cada fila: aplica el parser de presentación y deja un estado.
+  const analyzed: Analyzed[] = useMemo(() => {
     const ni = idx("name");
     const pi = idx("price");
     if (!rows.length || ni === NO_COLUMN || pi === NO_COLUMN) return [];
     const si = idx("saleUnit");
     const cti = idx("content");
+    const presi = idx("presentation");
     const codi = idx("code");
-    const out: ParsedRow[] = [];
+    const out: Analyzed[] = [];
+
     for (let i = headerRow + 1; i < rows.length; i++) {
       const r = rows[i];
       const name = (r[ni] ?? "").trim();
-      if (!name) continue; // fila vacía o sin producto → se ignora
+      if (!name) continue;
       const price = parsePrice(r[pi] ?? "");
       if (Number.isNaN(price)) continue;
 
-      const saleUnit = si >= 0 ? (r[si] || "").trim() : "";
+      const saleUnitLabel = si >= 0 ? (r[si] || "").trim() : "";
       let baseUnit: UnitKind = defaultUnit;
       let packSize = 1;
-      let usedFallback = true;
-      if (cti >= 0) {
+      let status: RowStatus = "fallback";
+      let saleUnit: string | null = saleUnitLabel || null;
+      let presentationRaw: string | null = null;
+      let suggestedQty: number | null = null;
+
+      if (presi >= 0 && (r[presi] || "").trim()) {
+        const raw = (r[presi] || "").trim();
+        const p = parsePresentation(raw);
+        const content = presentationToContent(p);
+        if (content) {
+          baseUnit = content.baseUnit;
+          packSize = content.packSize;
+          status = "ok";
+          saleUnit = saleUnitLabel || p.envase || null;
+        } else if (p.cantidad != null) {
+          // Envase anidado ("Caja x 6 bidones"): intentamos sacar el contenido
+          // del NOMBRE del producto (suele traerlo, ej "OREO 12 X 354 GRS").
+          const fromName = contentFromName(name, p.cantidad);
+          if (fromName) {
+            baseUnit = fromName.baseUnit;
+            packSize = fromName.packSize;
+            status = "ok";
+            saleUnit = saleUnitLabel || p.envase || null;
+          } else {
+            status = "review";
+            presentationRaw = raw;
+            suggestedQty = p.cantidad;
+            saleUnit = saleUnitLabel || p.envase || raw;
+          }
+        } else {
+          // Solo etiqueta (ej "docena"): la usamos como unidad de venta.
+          saleUnit = saleUnitLabel || raw;
+          status = "fallback";
+        }
+      } else if (cti >= 0) {
         const c = parseContent(r[cti] ?? "");
         if (c) {
           baseUnit = c.baseUnit;
           packSize = c.packSize;
-          usedFallback = false;
+          status = "ok";
         }
       }
+
       out.push({
-        usedFallback,
-        input: {
-          provider_id: providerId,
-          name,
-          code: codi >= 0 ? (r[codi] || "").trim() || null : null,
-          base_unit: baseUnit,
-          pack_size: packSize,
-          price,
-          sale_unit: saleUnit || null,
-          price_includes_iva: iva,
-        },
+        rowIndex: i, name, price, saleUnit, baseUnit, packSize, status,
+        presentationRaw, suggestedQty,
+        code: codi >= 0 ? (r[codi] || "").trim() || null : null,
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, headerRow, cols, defaultUnit, iva, providerId]);
+  }, [rows, headerRow, cols, defaultUnit]);
+
+  // Aplica la edición manual (si existe) a una fila a revisar.
+  function finalContent(a: Analyzed): { baseUnit: UnitKind; packSize: number } {
+    if (a.status === "review") {
+      const edit = reviewEdits[a.rowIndex];
+      const qty = edit ? parsePrice(edit.qty) : a.suggestedQty ?? NaN;
+      if (Number.isFinite(qty) && qty > 0) {
+        return qtyUnitToContent(qty, edit?.unit ?? "un");
+      }
+    }
+    return { baseUnit: a.baseUnit, packSize: a.packSize };
+  }
+
+  function toInput(a: Analyzed): ProductInput {
+    const c = finalContent(a);
+    return {
+      provider_id: providerId,
+      name: a.name,
+      code: a.code,
+      base_unit: c.baseUnit,
+      pack_size: c.packSize,
+      price: a.price,
+      sale_unit: a.saleUnit,
+      price_includes_iva: iva,
+    };
+  }
 
   const missingRequired = idx("name") === NO_COLUMN || idx("price") === NO_COLUMN;
-  const noContent = idx("content") === NO_COLUMN;
-  const fallbackCount = parsed.filter((p) => p.usedFallback).length;
+  const okCount = analyzed.filter((a) => a.status === "ok").length;
+  const fallbackCount = analyzed.filter((a) => a.status === "fallback").length;
+  const reviewRows = analyzed.filter((a) => a.status === "review");
+  const previewRows = analyzed.filter((a) => a.status !== "review");
 
   async function handleImport() {
-    if (parsed.length === 0) {
+    if (analyzed.length === 0) {
       toast.error("No hay filas válidas para importar.");
       return;
     }
     try {
-      const n = await bulk.mutateAsync(parsed.map((p) => p.input));
-      toast.success(`${n} productos importados.`);
+      const n = await bulk.mutateAsync(analyzed.map(toInput));
+      toast.success(`${n} productos importados.`, {
+        description:
+          reviewRows.length > 0
+            ? `${reviewRows.length} quedaron marcados para revisar el contenido.`
+            : undefined,
+      });
       reset();
       onOpenChange(false);
     } catch (e) {
@@ -210,30 +312,34 @@ export function ExcelImportDialog({
             />
             <p className="text-xs text-muted-foreground">
               Columnas que reconocemos (en cualquier orden): producto/descripción ·
-              precio/costo · unidad de venta/presentación · cantidad por
-              unidad/contenido · código.
+              precio/costo · presentación/formato · unidad de venta · cantidad por
+              unidad · código. La columna de presentación (ej “Bolsa x 5 kgs”) se
+              interpreta sola.
             </p>
           </div>
         ) : (
           <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1">
-            {/* Estado del mapeo automático */}
             {missingRequired ? (
               <Banner
                 tone="error"
                 icon={<CircleAlert className="size-4" />}
                 text="No detectamos Producto y/o Precio. Asignalos manualmente abajo."
               />
-            ) : noContent ? (
-              <Banner
-                tone="warn"
-                icon={<TriangleAlert className="size-4" />}
-                text="No detectamos la columna de cantidad/contenido. Asignala para calcular el costo por unidad, o elegí abajo una unidad por defecto."
-              />
             ) : (
               <Banner
-                tone="ok"
-                icon={<CheckCircle2 className="size-4" />}
-                text="Columnas detectadas automáticamente. Revisá la vista previa."
+                tone={reviewRows.length > 0 ? "warn" : "ok"}
+                icon={
+                  reviewRows.length > 0 ? (
+                    <TriangleAlert className="size-4" />
+                  ) : (
+                    <CheckCircle2 className="size-4" />
+                  )
+                }
+                text={`${okCount + fallbackCount} productos interpretados automáticamente${
+                  reviewRows.length > 0
+                    ? ` · ${reviewRows.length} requieren revisión manual (abajo)`
+                    : ""
+                }.`}
               />
             )}
 
@@ -272,10 +378,10 @@ export function ExcelImportDialog({
               </div>
             </div>
 
-            {/* Mapeo manual (fallback): siempre visible, ya pre-cargado */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <Mapping label="Producto *" value={cols.name} onChange={(v) => setCols((c) => ({ ...c, name: v }))} options={colOptions} />
               <Mapping label="Precio *" value={cols.price} onChange={(v) => setCols((c) => ({ ...c, price: v }))} options={colOptions} />
+              <Mapping label="Presentación" value={cols.presentation} onChange={(v) => setCols((c) => ({ ...c, presentation: v }))} options={colOptions} optional />
               <Mapping label="Unidad de venta" value={cols.saleUnit} onChange={(v) => setCols((c) => ({ ...c, saleUnit: v }))} options={colOptions} optional />
               <Mapping label="Cant. por unidad" value={cols.content} onChange={(v) => setCols((c) => ({ ...c, content: v }))} options={colOptions} optional />
               <Mapping label="Código" value={cols.code} onChange={(v) => setCols((c) => ({ ...c, code: v }))} options={colOptions} optional />
@@ -309,11 +415,11 @@ export function ExcelImportDialog({
             {!missingRequired && (
               <div>
                 <p className="mb-2 text-sm font-medium">
-                  Vista previa — {parsed.length} productos
+                  Vista previa — {previewRows.length} productos
                   {fallbackCount > 0 && (
                     <span className="ml-2 inline-flex items-center gap-1 text-amber-600">
                       <TriangleAlert className="size-3.5" />
-                      {fallbackCount} sin contenido (unidad por defecto: {defaultUnit}, pack 1)
+                      {fallbackCount} sin contenido (unidad por defecto: {defaultUnit})
                     </span>
                   )}
                 </p>
@@ -329,25 +435,102 @@ export function ExcelImportDialog({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {parsed.slice(0, 8).map((p, i) => {
-                        const { input } = p;
-                        const u = unitLabel(input.base_unit);
+                      {previewRows.slice(0, 8).map((a, i) => {
+                        const u = unitLabel(a.baseUnit);
                         return (
                           <TableRow key={i}>
                             <TableCell className="max-w-[220px] truncate">
-                              {input.name}
+                              {a.name}
                             </TableCell>
                             <TableCell className="text-muted-foreground">
-                              {input.sale_unit || u}
+                              {a.saleUnit || u}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
-                              {formatNum(input.pack_size)} {u}
+                              {formatNum(a.packSize)} {u}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
-                              {formatARS(input.price)}
+                              {formatARS(a.price)}
                             </TableCell>
                             <TableCell className="text-right tabular-nums text-muted-foreground">
-                              {formatARS(input.price / input.pack_size)} / {u}
+                              {formatARS(a.price / a.packSize)} / {u}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+
+            {reviewRows.length > 0 && (
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-amber-700">
+                  <TriangleAlert className="size-4" />
+                  Revisión manual — {reviewRows.length} productos
+                </p>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  No pudimos deducir el contenido (ej “Caja x 6 bidones”: no sabemos
+                  cuánto trae cada uno). Completá cantidad y unidad; te dejamos el
+                  texto original como referencia.
+                </p>
+                <div className="overflow-hidden rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Producto</TableHead>
+                        <TableHead>Presentación original</TableHead>
+                        <TableHead className="w-24 text-right">Cantidad</TableHead>
+                        <TableHead className="w-24">Unidad</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {reviewRows.map((a) => {
+                        const edit = reviewEdits[a.rowIndex];
+                        return (
+                          <TableRow key={a.rowIndex}>
+                            <TableCell className="max-w-[180px] truncate">
+                              {a.name}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {a.presentationRaw}
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                inputMode="decimal"
+                                className="h-8 text-right"
+                                value={edit?.qty ?? String(a.suggestedQty ?? "")}
+                                onChange={(e) =>
+                                  setReviewEdits((m) => ({
+                                    ...m,
+                                    [a.rowIndex]: {
+                                      qty: e.target.value,
+                                      unit: m[a.rowIndex]?.unit ?? "un",
+                                    },
+                                  }))
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <NativeSelect
+                                className="h-8"
+                                value={edit?.unit ?? "un"}
+                                onChange={(e) =>
+                                  setReviewEdits((m) => ({
+                                    ...m,
+                                    [a.rowIndex]: {
+                                      qty: m[a.rowIndex]?.qty ?? String(a.suggestedQty ?? ""),
+                                      unit: e.target.value as UnitKind,
+                                    },
+                                  }))
+                                }
+                              >
+                                {UNITS.map((u) => (
+                                  <option key={u.value} value={u.value}>
+                                    {u.value}
+                                  </option>
+                                ))}
+                              </NativeSelect>
                             </TableCell>
                           </TableRow>
                         );
@@ -367,9 +550,9 @@ export function ExcelImportDialog({
           {grid && (
             <Button
               onClick={handleImport}
-              disabled={bulk.isPending || missingRequired || parsed.length === 0}
+              disabled={bulk.isPending || missingRequired || analyzed.length === 0}
             >
-              {bulk.isPending ? "Importando…" : `Importar ${parsed.length} productos`}
+              {bulk.isPending ? "Importando…" : `Importar ${analyzed.length} productos`}
             </Button>
           )}
         </DialogFooter>

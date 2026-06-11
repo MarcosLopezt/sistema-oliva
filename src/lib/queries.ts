@@ -24,6 +24,11 @@ import type {
   BarBeverageInput,
   EventCost,
   EventCostInput,
+  Staff,
+  StaffInput,
+  EventStaffInput,
+  EventStaffWithStaff,
+  EventStaffWithEvent,
 } from "@/lib/types";
 
 const db = () => createClient();
@@ -121,7 +126,7 @@ export async function bulkInsertProducts(
 // ----------------------------- Ingredientes -----------------------------
 
 const INGREDIENT_SELECT =
-  "*, product:products(*, provider:providers(id, name))";
+  "*, product:products(*, provider:providers(id, name, phone))";
 
 export async function listIngredients(): Promise<IngredientWithProduct[]> {
   const { data, error } = await db()
@@ -175,7 +180,7 @@ export async function linkIngredientProduct(
 // ------------------------------- Recetas -------------------------------
 
 const RECIPE_ITEMS_SELECT =
-  "*, ingredient:ingredients(*, product:products(*, provider:providers(id, name)))";
+  "*, ingredient:ingredients(*, product:products(*, provider:providers(id, name, phone)))";
 
 export async function listRecipes(): Promise<RecipeListRow[]> {
   const { data, error } = await db()
@@ -481,4 +486,85 @@ export async function updateEventCost(
 export async function deleteEventCost(id: string): Promise<void> {
   const { error } = await db().from("event_costs").delete().eq("id", id);
   if (error) throw new Error(error.message);
+}
+
+// ------------------------------- Personal -------------------------------
+
+export async function listStaff(): Promise<Staff[]> {
+  const { data, error } = await db()
+    .from("staff")
+    .select("*")
+    .order("full_name");
+  return check(data, error);
+}
+
+export async function createStaff(input: StaffInput): Promise<Staff> {
+  const { data, error } = await db()
+    .from("staff")
+    .insert(input)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+export async function updateStaff(
+  id: string,
+  input: Partial<StaffInput>,
+): Promise<Staff> {
+  const { data, error } = await db()
+    .from("staff")
+    .update(input)
+    .eq("id", id)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+// --------------------- Personal asignado al evento ---------------------
+
+const EVENT_STAFF_SELECT = "*, staff:staff(*)";
+
+export async function listEventStaff(
+  eventId: string,
+): Promise<EventStaffWithStaff[]> {
+  const { data, error } = await db()
+    .from("event_staff")
+    .select(EVENT_STAFF_SELECT)
+    .eq("event_id", eventId);
+  if (error) throw new Error(error.message);
+  return (data as unknown as EventStaffWithStaff[]) ?? [];
+}
+
+export async function addEventStaff(
+  eventId: string,
+  input: EventStaffInput,
+): Promise<EventStaffWithStaff> {
+  const { data, error } = await db()
+    .from("event_staff")
+    .insert({ ...input, event_id: eventId })
+    .select(EVENT_STAFF_SELECT)
+    .single();
+  return check(data, error) as unknown as EventStaffWithStaff;
+}
+
+export async function updateEventStaff(
+  id: string,
+  input: Partial<EventStaffInput>,
+): Promise<void> {
+  const { error } = await db().from("event_staff").update(input).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function removeEventStaff(id: string): Promise<void> {
+  const { error } = await db().from("event_staff").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+/** Todas las participaciones en eventos (con empleado y evento) para la vista de Pagos. */
+export async function listStaffPayments(): Promise<EventStaffWithEvent[]> {
+  const { data, error } = await db()
+    .from("event_staff")
+    .select("*, staff:staff(*), event:events(id, name, event_date)");
+  if (error) throw new Error(error.message);
+  return (data as unknown as EventStaffWithEvent[]) ?? [];
 }

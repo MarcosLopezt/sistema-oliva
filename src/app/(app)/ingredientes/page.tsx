@@ -53,7 +53,7 @@ export default function IngredientesPage() {
     <div className="mx-auto max-w-6xl">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Ingredientes</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-primary">Ingredientes</h1>
           <p className="text-muted-foreground">
             Nombre canónico de receta, vinculado a un producto de proveedor.
           </p>

@@ -53,7 +53,7 @@ export default function ProveedoresPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Proveedores</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-primary">Proveedores</h1>
           <p className="text-muted-foreground">
             Cada proveedor tiene su lista de precios (productos).
           </p>

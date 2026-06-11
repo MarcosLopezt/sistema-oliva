@@ -56,9 +56,10 @@ function IngredientForm({
   const [baseUnit, setBaseUnit] = useState<UnitKind>(
     ingredient?.base_unit ?? "kg",
   );
-  const [marketPrice, setMarketPrice] = useState(
-    ingredient?.market_price != null ? String(ingredient.market_price) : "",
-  );
+  const initialPrice =
+    ingredient?.market_price != null ? String(ingredient.market_price) : "";
+  const [marketPrice, setMarketPrice] = useState(initialPrice);
+  const [marketAuto, setMarketAuto] = useState(ingredient?.market_auto ?? false);
   const [notes, setNotes] = useState(ingredient?.notes ?? "");
 
   const loading = create.isPending || update.isPending;
@@ -73,11 +74,24 @@ function IngredientForm({
       toast.error("Precio de mercado inválido.");
       return;
     }
+    // Si el usuario tocó el precio a mano, queda marcado como "manual".
+    const priceChanged = marketPrice.trim() !== initialPrice;
+    let source = ingredient?.market_price_source ?? null;
+    let updatedAt = ingredient?.market_price_updated_at ?? null;
+    if (priceChanged && mp != null) {
+      source = "manual";
+      updatedAt = new Date().toISOString();
+    } else if (mp == null) {
+      source = null;
+      updatedAt = null;
+    }
     const input = {
       name: name.trim(),
       base_unit: baseUnit,
       market_price: mp,
-      market_price_updated_at: mp != null ? new Date().toISOString() : null,
+      market_price_updated_at: updatedAt,
+      market_auto: marketAuto,
+      market_price_source: source,
       notes: notes.trim() || null,
     };
     try {
@@ -143,9 +157,20 @@ function IngredientForm({
             />
           </div>
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={marketAuto}
+            onChange={(e) => setMarketAuto(e.target.checked)}
+            className="size-4"
+          />
+          Sin proveedor fijo — buscar precio de mercado automáticamente
+        </label>
         <p className="text-xs text-muted-foreground">
           El precio de mercado se usa para ingredientes sin proveedor fijo (por
           unidad base). Si vinculás un producto, se prioriza el precio del proveedor.
+          Con la búsqueda automática activada, el precio se actualiza solo al abrir
+          un evento; si lo editás a mano queda como precio manual.
         </p>
         <div className="flex flex-col gap-2">
           <Label htmlFor="ing-notes">Notas (opcional)</Label>

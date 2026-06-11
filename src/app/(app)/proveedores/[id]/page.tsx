@@ -74,7 +74,7 @@ export default function ProviderProductsPage() {
 
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight text-primary">
             {provider?.name ?? "Proveedor"}
           </h1>
           <p className="text-muted-foreground">

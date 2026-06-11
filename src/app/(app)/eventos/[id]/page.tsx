@@ -22,6 +22,7 @@ import { MenuSelection } from "@/components/eventos/menu-selection";
 import { MateriaPrimaSection } from "@/components/eventos/materia-prima-section";
 import { BarraSection } from "@/components/eventos/barra-section";
 import { CostSection } from "@/components/eventos/cost-section";
+import { EventStaffSection } from "@/components/eventos/event-staff-section";
 import { EventSummary } from "@/components/eventos/event-summary";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
@@ -93,7 +94,7 @@ export default function EventoDetailPage() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <h1 className="text-2xl font-semibold tracking-tight text-primary">
               {event.name}
             </h1>
             <Badge variant={isActive ? "default" : "secondary"}>
@@ -150,23 +151,27 @@ export default function EventoDetailPage() {
         <MenuSelection event={event} selections={selections ?? []} />
 
         <div>
-          <h2 className="mb-3 text-lg font-semibold tracking-tight">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">
             Materia prima
           </h2>
           <MateriaPrimaSection event={event} selections={selections ?? []} />
         </div>
 
         <div>
-          <h2 className="mb-3 text-lg font-semibold tracking-tight">Barra</h2>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">Barra</h2>
           <BarraSection event={event} />
         </div>
 
         <div>
-          <h2 className="mb-3 text-lg font-semibold tracking-tight">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">Personal</h2>
+          <EventStaffSection eventId={event.id} />
+        </div>
+
+        <div>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">
             Otros costos
           </h2>
           <div className="flex flex-col gap-4">
-            <CostSection eventId={event.id} section="personal" costs={costs ?? []} />
             <CostSection eventId={event.id} section="vajilla" costs={costs ?? []} />
             <CostSection eventId={event.id} section="instalacion" costs={costs ?? []} />
             <CostSection eventId={event.id} section="extra" costs={costs ?? []} />

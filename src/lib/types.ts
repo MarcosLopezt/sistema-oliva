@@ -21,6 +21,8 @@ export type Provider = {
   id: string;
   name: string;
   notes: string | null;
+  /** Teléfono / WhatsApp (formato libre). Habilita compartir el pedido. */
+  phone: string | null;
   created_at: string;
 };
 
@@ -50,17 +52,27 @@ export type Ingredient = {
   /** Precio de referencia por base_unit cuando no hay proveedor fijo. */
   market_price: number | null;
   market_price_updated_at: string | null;
+  /** Si true, el precio de mercado se busca/actualiza automáticamente. */
+  market_auto: boolean;
+  /** Origen del precio actual: 'auto' (búsqueda) o 'manual' (editado a mano). */
+  market_price_source: "auto" | "manual" | null;
   notes: string | null;
   created_at: string;
 };
 
 /** Ingrediente con su producto vinculado embebido (join). */
 export type IngredientWithProduct = Ingredient & {
-  product: (Product & { provider: Pick<Provider, "id" | "name"> }) | null;
+  product:
+    | (Product & { provider: Pick<Provider, "id" | "name" | "phone"> })
+    | null;
 };
 
 // Tipos para inserción/edición (sin campos autogenerados).
-export type ProviderInput = { name: string; notes?: string | null };
+export type ProviderInput = {
+  name: string;
+  notes?: string | null;
+  phone?: string | null;
+};
 
 export type ProductInput = {
   provider_id: string;
@@ -79,6 +91,8 @@ export type IngredientInput = {
   product_id?: string | null;
   market_price?: number | null;
   market_price_updated_at?: string | null;
+  market_auto?: boolean;
+  market_price_source?: "auto" | "manual" | null;
   notes?: string | null;
 };
 
@@ -252,23 +266,42 @@ export type BarSettings = {
 
 export type BarSettingsInput = Omit<BarSettings, "id">;
 
+/**
+ * Servicio en el que figura una bebida. Igual que el del evento pero con
+ * 'ambos' (la bebida aparece tanto en barra con alcohol como sin alcohol).
+ */
+export type BeverageService = "sin_alcohol" | "con_alcohol" | "ambos";
+
+export const BEVERAGE_SERVICES: { value: BeverageService; label: string }[] = [
+  { value: "sin_alcohol", label: "Sin alcohol" },
+  { value: "con_alcohol", label: "Con alcohol" },
+  { value: "ambos", label: "Ambos (con y sin alcohol)" },
+];
+
 export type BarBeverage = {
   id: string;
   name: string;
-  service: Exclude<BarraService, "ninguna">;
+  service: BeverageService;
   size_ml: number;
   price: number;
   ml_per_person_hour: number;
+  /** Si true, el precio se busca/actualiza automáticamente (como ingredientes). */
+  market_auto: boolean;
+  market_price_source: "auto" | "manual" | null;
+  market_price_updated_at: string | null;
   sort_order: number;
   created_at: string;
 };
 
 export type BarBeverageInput = {
   name: string;
-  service: Exclude<BarraService, "ninguna">;
+  service: BeverageService;
   size_ml: number;
   price: number;
   ml_per_person_hour: number;
+  market_auto?: boolean;
+  market_price_source?: "auto" | "manual" | null;
+  market_price_updated_at?: string | null;
   sort_order?: number;
 };
 
@@ -371,4 +404,69 @@ export const COST_SECTIONS: Record<EventCostSection, CostSectionConfig> = {
     detailLabel: null,
     countsTowardPrice: false,
   },
+};
+
+// ------------------------- Personal (Mejora 1) -------------------------
+
+/**
+ * Categoría del empleado. Es texto libre en la base para mantenerlo
+ * extensible: para sumar una categoría nueva basta con agregarla acá.
+ */
+export type StaffCategory = string;
+
+export const STAFF_CATEGORIES: { value: string; label: string }[] = [
+  { value: "produccion", label: "Producción" },
+  { value: "servicio", label: "Servicio" },
+];
+
+export function staffCategoryLabel(value: string): string {
+  return STAFF_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
+
+export type Staff = {
+  id: string;
+  full_name: string;
+  category: StaffCategory;
+  role: string | null;
+  hourly_rate: number;
+  active: boolean;
+  created_at: string;
+};
+
+export type StaffInput = {
+  full_name: string;
+  category: StaffCategory;
+  role?: string | null;
+  hourly_rate: number;
+  active?: boolean;
+};
+
+/** Empleado asignado a un evento (horas + tarifa puntual + estado de pago). */
+export type EventStaff = {
+  id: string;
+  event_id: string;
+  staff_id: string;
+  hours: number;
+  /** Tarifa puntual para este evento (null = usar staff.hourly_rate). */
+  rate_override: number | null;
+  paid: boolean;
+  created_at: string;
+};
+
+export type EventStaffInput = {
+  staff_id: string;
+  hours: number;
+  rate_override?: number | null;
+  paid?: boolean;
+};
+
+/** Asignación con el empleado embebido (join). */
+export type EventStaffWithStaff = EventStaff & {
+  staff: Staff | null;
+};
+
+/** Asignación con el empleado y el evento embebidos (para la vista de Pagos). */
+export type EventStaffWithEvent = EventStaff & {
+  staff: Staff | null;
+  event: Pick<EventRow, "id" | "name" | "event_date"> | null;
 };

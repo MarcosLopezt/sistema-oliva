@@ -51,6 +51,7 @@ function ProviderForm({
   const create = useCreateProvider();
   const update = useUpdateProvider();
   const [name, setName] = useState(provider?.name ?? "");
+  const [phone, setPhone] = useState(provider?.phone ?? "");
   const [notes, setNotes] = useState(provider?.notes ?? "");
   const loading = create.isPending || update.isPending;
 
@@ -59,7 +60,11 @@ function ProviderForm({
       toast.error("Poné un nombre para el proveedor.");
       return;
     }
-    const input = { name: name.trim(), notes: notes.trim() || null };
+    const input = {
+      name: name.trim(),
+      phone: phone.trim() || null,
+      notes: notes.trim() || null,
+    };
     try {
       if (isEdit) {
         await update.mutateAsync({ id: provider!.id, input });
@@ -95,6 +100,19 @@ function ProviderForm({
             onChange={(e) => setName(e.target.value)}
             placeholder="Ej: El Criollo"
           />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="prov-phone">Teléfono / WhatsApp (opcional)</Label>
+          <Input
+            id="prov-phone"
+            inputMode="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Ej: +54 9 11 2345-6789"
+          />
+          <p className="text-xs text-muted-foreground">
+            Habilita compartir el pedido por WhatsApp.
+          </p>
         </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor="prov-notes">Notas (opcional)</Label>

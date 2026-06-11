@@ -47,7 +47,7 @@ export default function RecetasPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Recetas</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-primary">Recetas</h1>
           <p className="text-muted-foreground">
             Cada receta rinde un lote de unidades y se escala según los PAX.
           </p>

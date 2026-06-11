@@ -60,7 +60,7 @@ export function computeBarra(
   const mult = event.pax * event.duration_hours * fDia * fHor;
 
   const lines: BarraLine[] = beverages
-    .filter((b) => b.service === event.barra_service)
+    .filter((b) => b.service === event.barra_service || b.service === "ambos")
     .map((b) => {
       const totalMl = b.ml_per_person_hour * mult;
       const bottles = totalMl > 0 ? Math.ceil(totalMl / b.size_ml) : 0;

@@ -15,9 +15,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCreateBarBeverage, useUpdateBarBeverage } from "@/lib/hooks";
-import type { BarBeverage, BarraService } from "@/lib/types";
+import { BEVERAGE_SERVICES, type BarBeverage, type BeverageService } from "@/lib/types";
 
-type Service = Exclude<BarraService, "ninguna">;
+type Service = BeverageService;
 
 export function BeverageDialog({
   open,
@@ -53,11 +53,13 @@ function BeverageForm({
   const create = useCreateBarBeverage();
   const update = useUpdateBarBeverage();
 
+  const initialPrice = String(beverage?.price ?? 0);
   const [name, setName] = useState(beverage?.name ?? "");
   const [service, setService] = useState<Service>(beverage?.service ?? "con_alcohol");
   const [sizeMl, setSizeMl] = useState(String(beverage?.size_ml ?? 1000));
-  const [price, setPrice] = useState(String(beverage?.price ?? 0));
+  const [price, setPrice] = useState(initialPrice);
   const [mlpph, setMlpph] = useState(String(beverage?.ml_per_person_hour ?? 0));
+  const [marketAuto, setMarketAuto] = useState(beverage?.market_auto ?? false);
 
   const loading = create.isPending || update.isPending;
   const num = (s: string) => Number(s.replace(",", "."));
@@ -72,12 +74,21 @@ function BeverageForm({
       toast.error("El tamaño de la botella debe ser mayor a 0.");
       return;
     }
+    // Si tocaste el precio a mano, queda marcado como "manual".
+    const priceChanged = price !== initialPrice;
     const input = {
       name: name.trim(),
       service,
       size_ml: size,
       price: Math.max(0, num(price) || 0),
       ml_per_person_hour: Math.max(0, num(mlpph) || 0),
+      market_auto: marketAuto,
+      ...(priceChanged
+        ? {
+            market_price_source: "manual" as const,
+            market_price_updated_at: new Date().toISOString(),
+          }
+        : {}),
     };
     try {
       if (isEdit) {
@@ -122,8 +133,11 @@ function BeverageForm({
               value={service}
               onChange={(e) => setService(e.target.value as Service)}
             >
-              <option value="sin_alcohol">Sin alcohol</option>
-              <option value="con_alcohol">Con alcohol</option>
+              {BEVERAGE_SERVICES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
             </NativeSelect>
           </div>
           <div className="flex flex-col gap-2">
@@ -154,6 +168,19 @@ function BeverageForm({
             />
           </div>
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={marketAuto}
+            onChange={(e) => setMarketAuto(e.target.checked)}
+            className="size-4"
+          />
+          Buscar el precio de mercado automáticamente
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Con esto activado, el precio se actualiza solo (≈1 vez por semana) al
+          abrir un evento. Si editás el precio a mano, queda como precio manual.
+        </p>
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onDone}>

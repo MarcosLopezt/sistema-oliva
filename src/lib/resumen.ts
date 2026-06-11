@@ -28,17 +28,21 @@ function sumSection(costs: EventCost[], section: EventCostSection): number {
     .reduce((s, c) => s + c.quantity * c.unit_price, 0);
 }
 
-/** Integra todas las fuentes de costo del evento y calcula el precio sugerido por persona. */
+/**
+ * Integra todas las fuentes de costo del evento y calcula el precio sugerido por persona.
+ * `staffTotal` viene del módulo de Personal (event_staff), no de event_costs.
+ */
 export function computeEventSummary(
   event: EventRow,
   mp: MateriaPrimaResult,
   barra: BarraResult,
   costs: EventCost[],
+  staffTotal: number,
 ): EventSummary {
   const raw = [
     { key: "materia_prima", label: "Materia prima", total: mp.total },
     { key: "barra", label: "Barra", total: barra.total },
-    { key: "personal", label: "Personal", total: sumSection(costs, "personal") },
+    { key: "personal", label: "Personal", total: staffTotal },
     { key: "vajilla", label: "Vajilla", total: sumSection(costs, "vajilla") },
     {
       key: "instalacion",

@@ -5,11 +5,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   useEventRecipes,
   useEventCosts,
+  useEventStaff,
   useBarSettings,
   useBarBeverages,
 } from "@/lib/hooks";
 import { computeMateriaPrima } from "@/lib/materia-prima";
 import { computeBarra } from "@/lib/barra";
+import { computeEventStaff } from "@/lib/personal";
 import { computeEventSummary } from "@/lib/resumen";
 import { formatARS } from "@/lib/format";
 import type { EventRow } from "@/lib/types";
@@ -21,14 +23,16 @@ function pct(n: number): string {
 export function EventSummary({ event }: { event: EventRow }) {
   const { data: selections } = useEventRecipes(event.id);
   const { data: costs } = useEventCosts(event.id);
+  const { data: staff } = useEventStaff(event.id);
   const { data: settings } = useBarSettings();
   const { data: beverages } = useBarBeverages();
 
   const summary = useMemo(() => {
     const mp = computeMateriaPrima(event, selections ?? []);
     const barra = computeBarra(event, settings, beverages ?? []);
-    return computeEventSummary(event, mp, barra, costs ?? []);
-  }, [event, selections, settings, beverages, costs]);
+    const staffTotal = computeEventStaff(staff ?? []).total;
+    return computeEventSummary(event, mp, barra, costs ?? [], staffTotal);
+  }, [event, selections, settings, beverages, costs, staff]);
 
   return (
     <Card className="border-primary/30">

@@ -14,8 +14,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useBarSettings, useBarBeverages, useUpdateEvent } from "@/lib/hooks";
+import {
+  useBarSettings,
+  useBarBeverages,
+  useUpdateEvent,
+  useBeverageMarketPriceUpdater,
+} from "@/lib/hooks";
 import { computeBarra } from "@/lib/barra";
+import { beverageMarketLabel } from "@/lib/market-price";
 import { formatARS, formatNum } from "@/lib/format";
 import {
   BARRA_SERVICES,
@@ -36,6 +42,13 @@ export function BarraSection({ event }: { event: EventRow }) {
     () => computeBarra(event, settings, beverages ?? []),
     [event, settings, beverages],
   );
+
+  // Actualiza en background el precio de las bebidas con búsqueda automática.
+  const failed = useBeverageMarketPriceUpdater(beverages ?? []);
+  const beveragesById = useMemo(() => {
+    const map = new Map((beverages ?? []).map((b) => [b.id, b]));
+    return map;
+  }, [beverages]);
 
   async function patch(input: Partial<EventRow>) {
     try {
@@ -154,9 +167,30 @@ export function BarraSection({ event }: { event: EventRow }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {result.lines.map((l) => (
+                {result.lines.map((l) => {
+                  const bev = beveragesById.get(l.id);
+                  const label = bev
+                    ? beverageMarketLabel(bev, failed.has(l.id))
+                    : null;
+                  return (
                   <TableRow key={l.id}>
-                    <TableCell className="font-medium">{l.name}</TableCell>
+                    <TableCell className="font-medium">
+                      {l.name}
+                      {label && (
+                        <span
+                          className={
+                            "mt-0.5 block text-xs font-normal " +
+                            (label.tone === "stale"
+                              ? "text-amber-600"
+                              : label.tone === "manual"
+                                ? "text-muted-foreground"
+                                : "text-emerald-600")
+                          }
+                        >
+                          {label.text}
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {l.bottles} × {formatNum(l.sizeMl)} ml
                     </TableCell>
@@ -167,7 +201,8 @@ export function BarraSection({ event }: { event: EventRow }) {
                       {formatARS(l.subtotal)}
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </Card>

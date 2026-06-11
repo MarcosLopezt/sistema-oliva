@@ -1,11 +1,18 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import * as q from "@/lib/queries";
+import {
+  fetchMarketPrice,
+  isStaleAuto,
+  isStaleAutoBeverage,
+} from "@/lib/market-price";
+import type { IngredientWithProduct, BarBeverage } from "@/lib/types";
 import type {
   ProviderInput,
   ProductInput,
@@ -18,6 +25,8 @@ import type {
   BarSettingsInput,
   BarBeverageInput,
   EventCostInput,
+  StaffInput,
+  EventStaffInput,
 } from "@/lib/types";
 
 export const keys = {
@@ -34,6 +43,9 @@ export const keys = {
   barSettings: ["bar_settings"] as const,
   barBeverages: ["bar_beverages"] as const,
   eventCosts: (id: string) => ["events", id, "costs"] as const,
+  staff: ["staff"] as const,
+  eventStaff: (id: string) => ["events", id, "staff"] as const,
+  staffPayments: ["staff", "payments"] as const,
 };
 
 // ----------------------------- Proveedores -----------------------------
@@ -410,4 +422,194 @@ export function useDeleteEventCost() {
     onSuccess: (_d, vars) =>
       qc.invalidateQueries({ queryKey: keys.eventCosts(vars.eventId) }),
   });
+}
+
+// ------------------------------- Personal -------------------------------
+
+export function useStaff() {
+  return useQuery({ queryKey: keys.staff, queryFn: q.listStaff });
+}
+
+export function useCreateStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: StaffInput) => q.createStaff(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.staff }),
+  });
+}
+
+export function useUpdateStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Partial<StaffInput> }) =>
+      q.updateStaff(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.staff });
+      qc.invalidateQueries({ queryKey: keys.staffPayments });
+    },
+  });
+}
+
+export function useEventStaff(eventId: string | undefined) {
+  return useQuery({
+    queryKey: keys.eventStaff(eventId ?? ""),
+    queryFn: () => q.listEventStaff(eventId!),
+    enabled: !!eventId,
+  });
+}
+
+function invalidateStaffViews(qc: ReturnType<typeof useQueryClient>, eventId: string) {
+  qc.invalidateQueries({ queryKey: keys.eventStaff(eventId) });
+  qc.invalidateQueries({ queryKey: keys.staffPayments });
+  qc.invalidateQueries({ queryKey: keys.event(eventId) });
+}
+
+export function useAddEventStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ eventId, input }: { eventId: string; input: EventStaffInput }) =>
+      q.addEventStaff(eventId, input),
+    onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
+  });
+}
+
+export function useUpdateEventStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      eventId: string;
+      input: Partial<EventStaffInput>;
+    }) => q.updateEventStaff(id, input),
+    onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
+  });
+}
+
+export function useRemoveEventStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string; eventId: string }) =>
+      q.removeEventStaff(id),
+    onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
+  });
+}
+
+export function useStaffPayments() {
+  return useQuery({
+    queryKey: keys.staffPayments,
+    queryFn: q.listStaffPayments,
+  });
+}
+
+// ----------------------- Precio de mercado (auto) -----------------------
+
+/**
+ * Busca en background el precio de mercado de los ingredientes "sin proveedor
+ * fijo" (market_auto) que estén vencidos, y los actualiza. No bloquea la carga
+ * del evento. Devuelve el set de ids cuya búsqueda falló (para avisar al usuario).
+ */
+export function useMarketPriceUpdater(
+  eventId: string,
+  ingredients: IngredientWithProduct[],
+): Set<string> {
+  const qc = useQueryClient();
+  const [failed, setFailed] = useState<Set<string>>(new Set());
+  const attempted = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const stale = ingredients.filter(isStaleAuto);
+    if (stale.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      let changed = false;
+      for (const ing of stale) {
+        if (attempted.current.has(ing.id)) continue;
+        attempted.current.add(ing.id);
+
+        const price = await fetchMarketPrice(ing.name, { unit: ing.base_unit });
+        if (cancelled) return;
+        if (price == null) {
+          setFailed((s) => new Set(s).add(ing.id));
+          continue;
+        }
+        try {
+          await q.updateIngredient(ing.id, {
+            market_price: price,
+            market_price_updated_at: new Date().toISOString(),
+            market_price_source: "auto",
+          });
+          changed = true;
+        } catch {
+          if (!cancelled) setFailed((s) => new Set(s).add(ing.id));
+        }
+      }
+      if (changed && !cancelled) {
+        qc.invalidateQueries({ queryKey: keys.ingredients });
+        qc.invalidateQueries({ queryKey: keys.eventRecipes(eventId) });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ingredients, eventId, qc]);
+
+  return failed;
+}
+
+/**
+ * Igual que useMarketPriceUpdater pero para las bebidas de la barra: busca en
+ * background el precio de las bebidas con market_auto vencidas y actualiza su
+ * columna `price`. Devuelve el set de ids cuya búsqueda falló.
+ */
+export function useBeverageMarketPriceUpdater(
+  beverages: BarBeverage[],
+): Set<string> {
+  const qc = useQueryClient();
+  const [failed, setFailed] = useState<Set<string>>(new Set());
+  const attempted = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const stale = beverages.filter(isStaleAutoBeverage);
+    if (stale.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      let changed = false;
+      for (const bev of stale) {
+        if (attempted.current.has(bev.id)) continue;
+        attempted.current.add(bev.id);
+
+        const price = await fetchMarketPrice(bev.name, { sizeMl: bev.size_ml });
+        if (cancelled) return;
+        if (price == null) {
+          setFailed((s) => new Set(s).add(bev.id));
+          continue;
+        }
+        try {
+          await q.updateBarBeverage(bev.id, {
+            price,
+            market_price_updated_at: new Date().toISOString(),
+            market_price_source: "auto",
+          });
+          changed = true;
+        } catch {
+          if (!cancelled) setFailed((s) => new Set(s).add(bev.id));
+        }
+      }
+      if (changed && !cancelled) {
+        qc.invalidateQueries({ queryKey: keys.barBeverages });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [beverages, qc]);
+
+  return failed;
 }

@@ -22,7 +22,7 @@ export default function EventosPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Eventos</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-primary">Eventos</h1>
           <p className="text-muted-foreground">
             Próximos primero. Creá un evento para empezar a costear.
           </p>
@@ -72,7 +72,7 @@ function Section({
 }) {
   return (
     <section>
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+      <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         {icon}
         {title} ({events.length})
       </h2>

@@ -3,6 +3,7 @@ import {
   BookOpen,
   Truck,
   Carrot,
+  Users,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -18,6 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Eventos", icon: CalendarDays },
   { href: "/recetas", label: "Recetas", icon: BookOpen },
   { href: "/proveedores", label: "Proveedores", icon: Truck },
+  { href: "/personal", label: "Personal", icon: Users },
   { href: "/ingredientes", label: "Ingredientes", icon: Carrot },
   { href: "/configuracion", label: "Configuración", icon: Settings },
 ];
