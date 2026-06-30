@@ -48,7 +48,7 @@ export function LoginForm() {
       <CardHeader className="text-center">
         <CardTitle className="sr-only">Oliva</CardTitle>
         <img
-          src="/oliva-logo.png"
+          src="/oliva-logo.svg"
           alt="Oliva"
           className="mx-auto h-20 w-auto"
         />

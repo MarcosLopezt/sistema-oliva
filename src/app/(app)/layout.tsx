@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppSidebar } from "@/components/app-sidebar";
+import { MobileNav } from "@/components/mobile-nav";
 import { UserMenu } from "@/components/user-menu";
 
 export default async function AppLayout({
@@ -20,9 +21,12 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background px-4">
-        <Link href="/" className="flex items-center gap-2">
-          <img src="/oliva-logo.png" alt="Oliva" className="h-9 w-auto" />
-        </Link>
+        <div className="flex items-center gap-2">
+          <MobileNav />
+          <Link href="/" className="flex items-center gap-2">
+            <img src="/oliva-logo.png" alt="Oliva" className="h-9 w-auto" />
+          </Link>
+        </div>
         <UserMenu email={user.email ?? ""} />
       </header>
 
