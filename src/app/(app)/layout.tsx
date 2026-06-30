@@ -20,11 +20,8 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background px-4">
-        <Link href="/" className="flex items-center gap-2 font-semibold uppercase tracking-widest text-primary">
-          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            O
-          </span>
-          Oliva
+        <Link href="/" className="flex items-center gap-2">
+          <img src="/oliva-logo.png" alt="Oliva" className="h-9 w-auto" />
         </Link>
         <UserMenu email={user.email ?? ""} />
       </header>

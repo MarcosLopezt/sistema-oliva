@@ -46,7 +46,12 @@ export function LoginForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader className="text-center">
-        <CardTitle className="text-2xl">Oliva</CardTitle>
+        <CardTitle className="sr-only">Oliva</CardTitle>
+        <img
+          src="/oliva-logo.png"
+          alt="Oliva"
+          className="mx-auto h-20 w-auto"
+        />
         <CardDescription>Gestión y costeo de eventos</CardDescription>
       </CardHeader>
       <CardContent>

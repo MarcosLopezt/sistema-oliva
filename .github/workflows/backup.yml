@@ -1,0 +1,35 @@
+# .github/workflows/backup.yml
+# Backup de la base Supabase con pg_dump. Usa el contenedor oficial
+# postgres:17 para que la versión de pg_dump coincida con Supabase.
+# Guarda el dump comprimido como artifact de GitHub (retención 30 días).
+name: Backup Supabase DB
+
+on:
+  schedule:
+    # Domingos y miércoles a las 06:00 UTC (~03:00 ART).
+    - cron: "0 6 * * 0,3"
+  workflow_dispatch: {} # correr a mano cuando quieras
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    container: postgres:17 # trae pg_dump 17, compatible con Supabase
+    steps:
+      - name: Generar dump
+        run: |
+          STAMP=$(date +'%Y-%m-%d_%H%M')
+          FILE="oliva_${STAMP}.sql.gz"
+          echo "Generando backup: $FILE"
+          # --no-owner / --no-acl evitan errores al restaurar en otra cuenta.
+          pg_dump "${DATABASE_URL}" --no-owner --no-acl | gzip > "$FILE"
+          ls -lh "$FILE"
+          echo "DUMP_FILE=$FILE" >> "$GITHUB_ENV"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Subir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ github.run_id }}
+          path: oliva_*.sql.gz
+          retention-days: 30
