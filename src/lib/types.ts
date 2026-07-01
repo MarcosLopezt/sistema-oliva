@@ -39,6 +39,15 @@ export type Product = {
   /** Nombre de la unidad de venta del proveedor (ej: "cabeza", "bolsa", "docena"). Solo display. */
   sale_unit: string | null;
   price_includes_iva: boolean;
+  /**
+   * Volumen o peso que contiene cada unidad individual cuando base_unit='un'.
+   * Ej: 700 (para una botella de 700 ml). Permite calcular costo proporcional
+   * en recetas y cantidades exactas en eventos (unidades → cajas).
+   * Normalizado a la unidad chica: ml para volúmenes, g para masas.
+   */
+  unit_content_value: number | null;
+  /** Unidad del contenido por unidad. Solo aplica cuando unit_content_value != null. */
+  unit_content_unit: UnitKind | null;
   updated_at: string;
   created_at: string;
 };
@@ -83,6 +92,8 @@ export type ProductInput = {
   price: number;
   sale_unit?: string | null;
   price_includes_iva?: boolean;
+  unit_content_value?: number | null;
+  unit_content_unit?: UnitKind | null;
 };
 
 export type IngredientInput = {
@@ -219,6 +230,8 @@ export type EventRow = {
   barra_dia: BarraDia;
   barra_horario: BarraHorario;
   notes: string | null;
+  /** Margen global de vajilla: unidades extra de reserva (default 5). */
+  vajilla_margin: number;
   created_at: string;
 };
 
@@ -237,6 +250,7 @@ export type EventInput = {
   barra_dia?: BarraDia;
   barra_horario?: BarraHorario;
   notes?: string | null;
+  vajilla_margin?: number;
 };
 
 export type EventRecipe = {
@@ -469,4 +483,98 @@ export type EventStaffWithStaff = EventStaff & {
 export type EventStaffWithEvent = EventStaff & {
   staff: Staff | null;
   event: Pick<EventRow, "id" | "name" | "event_date"> | null;
+};
+
+// ----------------------------- Vajilla --------------------------------
+
+export type TablewareCategory =
+  | "platos"
+  | "cubiertos"
+  | "cristaleria"
+  | "bandejas"
+  | "utensilios"
+  | "otros";
+
+export const TABLEWARE_CATEGORIES: { value: TablewareCategory; label: string }[] = [
+  { value: "platos", label: "Platos" },
+  { value: "cubiertos", label: "Cubiertos" },
+  { value: "cristaleria", label: "Cristalería" },
+  { value: "bandejas", label: "Bandejas" },
+  { value: "utensilios", label: "Utensilios de cocina" },
+  { value: "otros", label: "Otros" },
+];
+
+export type TablewareCostType = "alquiler" | "compra";
+
+export const TABLEWARE_COST_TYPES: { value: TablewareCostType; label: string }[] = [
+  { value: "alquiler", label: "Alquiler" },
+  { value: "compra", label: "Compra" },
+];
+
+export type TablewareProvider = {
+  id: string;
+  name: string;
+  notes: string | null;
+  phone: string | null;
+  created_at: string;
+};
+
+export type TablewareItem = {
+  id: string;
+  provider_id: string;
+  name: string;
+  category: TablewareCategory;
+  cost_type: TablewareCostType;
+  unit_price: number;
+  notes: string | null;
+  created_at: string;
+};
+
+export type TablewareItemWithProvider = TablewareItem & {
+  provider: Pick<TablewareProvider, "id" | "name" | "phone"> | null;
+};
+
+export type EventTableware = {
+  id: string;
+  event_id: string;
+  item_id: string;
+  quantity: number;
+  breakage_qty: number;
+  charge_purchase: boolean;
+  /** Unidades de este ítem por persona (para autocálculo). */
+  multiplier: number;
+  /** Margen propio del ítem (null = usar vajilla_margin del evento). */
+  margin_override: number | null;
+  /** true = el usuario editó la cantidad a mano; no recalcular automáticamente. */
+  quantity_manual: boolean;
+  created_at: string;
+};
+
+export type EventTablewareWithItem = EventTableware & {
+  item: TablewareItemWithProvider | null;
+};
+
+export type TablewareProviderInput = {
+  name: string;
+  notes?: string | null;
+  phone?: string | null;
+};
+
+export type TablewareItemInput = {
+  provider_id: string;
+  name: string;
+  category?: TablewareCategory;
+  cost_type?: TablewareCostType;
+  unit_price: number;
+  notes?: string | null;
+};
+
+export type EventTablewareInput = {
+  item_id: string;
+  quantity: number;
+  breakage_qty?: number;
+  charge_purchase?: boolean;
+  multiplier?: number;
+  margin_override?: number | null;
+  quantity_manual?: boolean;
 };

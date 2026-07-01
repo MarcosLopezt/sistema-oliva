@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { useCreateProduct, useUpdateProduct } from "@/lib/hooks";
 import { UNITS, type Product, type UnitKind } from "@/lib/types";
+import { parseUnitContentFromName } from "@/lib/unit-content-parser";
 
 export function ProductDialog({
   open,
@@ -64,7 +65,62 @@ function ProductForm({
   const [price, setPrice] = useState(String(product?.price ?? 0));
   const [iva, setIva] = useState(product?.price_includes_iva ?? false);
 
+  // Contenido por unidad: inicializar desde DB o auto-detectar del nombre.
+  function initContent(): {
+    value: string;
+    unit: UnitKind | "";
+    source: "name" | "manual" | "";
+  } {
+    if (product?.unit_content_value != null) {
+      return {
+        value: String(product.unit_content_value),
+        unit: product.unit_content_unit ?? "",
+        source: "manual",
+      };
+    }
+    const detected = parseUnitContentFromName(product?.name ?? "");
+    if (detected) {
+      return { value: String(detected.value), unit: detected.unit, source: "name" };
+    }
+    return { value: "", unit: "", source: "" };
+  }
+
+  const init = initContent();
+  const [unitContentValue, setUnitContentValue] = useState(init.value);
+  const [unitContentUnit, setUnitContentUnit] = useState<UnitKind | "">(init.unit);
+  // "name" = auto-detectado del nombre | "manual" = editado por el usuario | "" = vacío.
+  const [contentSource, setContentSource] = useState<"name" | "manual" | "">(
+    init.source,
+  );
+
   const loading = create.isPending || update.isPending;
+
+  function handleNameChange(newName: string) {
+    setName(newName);
+    // Solo re-detectar automáticamente si el usuario no editó el campo a mano.
+    if (contentSource !== "manual") {
+      const detected = parseUnitContentFromName(newName);
+      if (detected) {
+        setUnitContentValue(String(detected.value));
+        setUnitContentUnit(detected.unit);
+        setContentSource("name");
+      } else {
+        setUnitContentValue("");
+        setUnitContentUnit("");
+        setContentSource("");
+      }
+    }
+  }
+
+  function handleContentValueChange(v: string) {
+    setUnitContentValue(v);
+    setContentSource("manual");
+  }
+
+  function handleContentUnitChange(u: UnitKind | "") {
+    setUnitContentUnit(u);
+    setContentSource("manual");
+  }
 
   async function handleSave() {
     if (!name.trim()) {
@@ -81,6 +137,14 @@ function ProductForm({
       toast.error("Precio inválido.");
       return;
     }
+
+    // Contenido por unidad: ambos campos deben estar completos para ser válidos.
+    const ucv = unitContentValue
+      ? Number(unitContentValue.replace(",", "."))
+      : null;
+    const ucu = unitContentUnit || null;
+    const validContent = ucv && ucv > 0 && ucu ? { ucv, ucu } : null;
+
     const input = {
       provider_id: providerId,
       name: name.trim(),
@@ -90,6 +154,8 @@ function ProductForm({
       pack_size: pack,
       price: pr,
       price_includes_iva: iva,
+      unit_content_value: validContent?.ucv ?? null,
+      unit_content_unit: validContent?.ucu ?? null,
     };
     try {
       if (isEdit) {
@@ -122,7 +188,7 @@ function ProductForm({
           <Input
             id="prod-name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => handleNameChange(e.target.value)}
             placeholder="Ej: ACEITE DE GIRASOL BIDON X 5LT"
           />
         </div>
@@ -188,6 +254,49 @@ function ProductForm({
           />
           El precio incluye IVA
         </label>
+
+        {/* Contenido por unidad — para productos en "unidades" con volumen/peso */}
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+          <div className="flex items-center justify-between">
+            <Label>Contenido por unidad</Label>
+            {contentSource === "name" && (
+              <span className="text-xs text-muted-foreground">
+                detectado del nombre
+              </span>
+            )}
+            {contentSource === "manual" && (
+              <span className="text-xs text-muted-foreground">
+                ingresado manualmente
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Para productos en "unidades" que contienen volumen o peso (ej: botella
+            de 700 ml). Habilita calcular costos proporcionales en recetas.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              inputMode="decimal"
+              placeholder="Cantidad (ej: 700)"
+              value={unitContentValue}
+              onChange={(e) => handleContentValueChange(e.target.value)}
+              className="w-32"
+            />
+            <NativeSelect
+              value={unitContentUnit}
+              onChange={(e) =>
+                handleContentUnitChange(e.target.value as UnitKind | "")
+              }
+              className="flex-1"
+            >
+              <option value="">— sin unidad —</option>
+              <option value="ml">ml (mililitros)</option>
+              <option value="g">g (gramos)</option>
+              <option value="l">L (litros)</option>
+              <option value="kg">kg (kilos)</option>
+            </NativeSelect>
+          </div>
+        </div>
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onDone}>

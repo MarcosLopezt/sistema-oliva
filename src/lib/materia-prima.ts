@@ -66,6 +66,19 @@ export type MPLine = {
   saleUnit: string | null;
   priceEach: number;
   subtotal: number;
+  /**
+   * MODELO TRES CAPAS (solo cuando el producto tiene unit_content):
+   * Unidades individuales realmente necesarias antes de redondear a packs.
+   * Ej: se necesitan 1.643 botellas → unitsNeeded = 2.
+   */
+  unitsNeeded: number | null;
+  /** Tamaño del pack (unidades por caja). Solo con unit_content. */
+  unitsPerPack: number | null;
+  /**
+   * Unidades sobrantes al comprar packs completos (packs × pack_size − unitsNeeded).
+   * Ej: comprar 1 caja (6 un) pero necesitar 2 → surplusUnits = 4.
+   */
+  surplusUnits: number | null;
 };
 
 export type MPGroup = {
@@ -153,42 +166,89 @@ export function computeMateriaPrima(
 
   for (const { ingredient: ing, baseQty } of needs.values()) {
     if (ing.product) {
-      const factor = convert(1, ing.base_unit, ing.product.base_unit);
-      if (factor == null) {
-        problems.push({
-          ingredientName: ing.name,
-          reason: "unidad del producto incompatible",
-        });
-        continue;
-      }
-      const neededProductUnits = baseQty * factor;
-      const packs = Math.max(1, Math.ceil(neededProductUnits / ing.product.pack_size));
-      const subtotal = packs * ing.product.price;
-      const provider = ing.product.provider;
-      const baseUnitLabel = unitLbl(ing.product.base_unit);
-      addLine(
-        provider?.id ?? "sin-proveedor",
-        {
-          provider: provider?.name ?? "Sin proveedor",
-          providerId: provider?.id ?? null,
-          phone: provider?.phone ?? null,
-        },
-        {
+      const prod = ing.product;
+      const provider = prod.provider;
+      const providerKey = provider?.id ?? "sin-proveedor";
+      const providerMeta = {
+        provider: provider?.name ?? "Sin proveedor",
+        providerId: provider?.id ?? null,
+        phone: provider?.phone ?? null,
+      };
+
+      // Camino 1: conversión directa entre dimensiones compatibles (ej: kg ↔ kg).
+      const directFactor = convert(1, ing.base_unit, prod.base_unit);
+      if (directFactor != null) {
+        const neededProductUnits = baseQty * directFactor;
+        const packs = Math.max(1, Math.ceil(neededProductUnits / prod.pack_size));
+        const subtotal = packs * prod.price;
+        const baseUnitLabel = unitLbl(prod.base_unit);
+        addLine(providerKey, providerMeta, {
           ingredientId: ing.id,
           ingredientName: ing.name,
-          productName: ing.product.name,
+          productName: prod.name,
           buyQty: packs,
           buyUnitLabel:
-            ing.product.pack_size === 1
+            prod.pack_size === 1
               ? baseUnitLabel
-              : `pack ${ing.product.pack_size} ${baseUnitLabel}`,
-          totalBaseQty: packs * ing.product.pack_size,
+              : `pack ${prod.pack_size} ${baseUnitLabel}`,
+          totalBaseQty: packs * prod.pack_size,
           baseUnitLabel,
-          saleUnit: ing.product.sale_unit ?? null,
-          priceEach: ing.product.price,
+          saleUnit: prod.sale_unit ?? null,
+          priceEach: prod.price,
           subtotal,
-        },
-      );
+          unitsNeeded: null,
+          unitsPerPack: null,
+          surplusUnits: null,
+        });
+      } else if (prod.unit_content_value && prod.unit_content_unit) {
+        // Camino 2: modelo tres capas.
+        //   contenido (ml/g) → unidades individuales → packs (cajas).
+        // Se usa cuando el producto está en 'un' con un contenido definido
+        // (ej: botella 700 ml, caja de 6).
+        const contentUnit = prod.unit_content_unit as UnitKind;
+        const contentFactor = convert(1, ing.base_unit, contentUnit);
+        if (contentFactor == null) {
+          problems.push({
+            ingredientName: ing.name,
+            reason: `unidad incompatible con contenido del producto (${ing.base_unit} vs ${contentUnit})`,
+          });
+          continue;
+        }
+        // 1) Cuánto contenido (ml/g) necesito en total.
+        const contentNeeded = baseQty * contentFactor;
+        // 2) Cuántas unidades individuales (botellas) necesito — redondear arriba.
+        const rawUnitsNeeded = contentNeeded / prod.unit_content_value;
+        const unitsNeeded = Math.max(1, Math.ceil(rawUnitsNeeded));
+        // 3) Cuántos packs (cajas) debo pedir — redondear arriba.
+        const packs = Math.max(1, Math.ceil(unitsNeeded / prod.pack_size));
+        const purchasedUnits = packs * prod.pack_size;
+        const surplusUnits = purchasedUnits - unitsNeeded;
+        const subtotal = packs * prod.price;
+        const saleUnitLabel = prod.sale_unit ?? `pack ${prod.pack_size} un`;
+        addLine(providerKey, providerMeta, {
+          ingredientId: ing.id,
+          ingredientName: ing.name,
+          productName: prod.name,
+          buyQty: packs,
+          buyUnitLabel: saleUnitLabel,
+          totalBaseQty: purchasedUnits,
+          baseUnitLabel: "un",
+          saleUnit: prod.sale_unit ?? null,
+          priceEach: prod.price,
+          subtotal,
+          unitsNeeded,
+          unitsPerPack: prod.pack_size,
+          surplusUnits: surplusUnits > 0 ? surplusUnits : 0,
+        });
+      } else {
+        problems.push({
+          ingredientName: ing.name,
+          reason:
+            prod.base_unit === "un"
+              ? "producto en unidades sin contenido configurado — editá el producto y cargá su contenido por unidad"
+              : "unidad del producto incompatible",
+        });
+      }
     } else if (ing.market_price != null) {
       const subtotal = baseQty * ing.market_price;
       const baseUnitLabel = unitLbl(ing.base_unit);
@@ -206,6 +266,9 @@ export function computeMateriaPrima(
           saleUnit: null,
           priceEach: ing.market_price,
           subtotal,
+          unitsNeeded: null,
+          unitsPerPack: null,
+          surplusUnits: null,
         },
       );
     } else {
@@ -241,9 +304,12 @@ export function buildProviderOrderMessage(
   group: MPGroup,
 ): string {
   const lines = group.lines.map((l) => {
-    // Unidad de venta del proveedor: ej "2 caja" / "3 pack 5 kg".
     const saleLabel = l.saleUnit ?? l.buyUnitLabel;
     const packs = `${formatNum(l.buyQty)} ${saleLabel}`;
+    // Para modelo tres capas: mostrar unidades reales y cajas por separado.
+    if (l.unitsNeeded != null && l.unitsPerPack != null) {
+      return `- ${l.ingredientName}: ${formatNum(l.unitsNeeded)} un (${packs})`;
+    }
     const total = `${formatNum(l.totalBaseQty)} ${l.baseUnitLabel}`;
     return `- ${l.ingredientName}: ${total} (${packs})`;
   });
@@ -258,6 +324,22 @@ export function buildProviderOrderMessage(
     "Quedamos en contacto. Saludos,",
     "Oliva Gastronomía",
   ].join("\n");
+}
+
+/**
+ * Indica si el sobrante de una línea es lo suficientemente grande como para
+ * mostrarlo como alerta informativa (nunca de error).
+ * Umbral: sobran más de 1 unidad O el sobrante supera el 30 % de lo comprado.
+ */
+export function isSurplusSignificant(line: MPLine): boolean {
+  if (
+    line.surplusUnits == null ||
+    line.unitsPerPack == null ||
+    line.surplusUnits <= 0
+  )
+    return false;
+  const purchased = line.totalBaseQty; // = packs × pack_size
+  return line.surplusUnits > 1 || line.surplusUnits / purchased > 0.3;
 }
 
 /** Normaliza un teléfono a solo dígitos para armar el link de wa.me. */

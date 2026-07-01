@@ -8,11 +8,13 @@ import {
   useEventStaff,
   useBarSettings,
   useBarBeverages,
+  useEventTableware,
 } from "@/lib/hooks";
 import { computeMateriaPrima } from "@/lib/materia-prima";
 import { computeBarra } from "@/lib/barra";
 import { computeEventStaff } from "@/lib/personal";
 import { computeEventSummary } from "@/lib/resumen";
+import { computeVajillaTotal } from "@/lib/queries";
 import { formatARS } from "@/lib/format";
 import type { EventRow } from "@/lib/types";
 
@@ -26,13 +28,15 @@ export function EventSummary({ event }: { event: EventRow }) {
   const { data: staff } = useEventStaff(event.id);
   const { data: settings } = useBarSettings();
   const { data: beverages } = useBarBeverages();
+  const { data: tableware } = useEventTableware(event.id);
 
   const summary = useMemo(() => {
     const mp = computeMateriaPrima(event, selections ?? []);
     const barra = computeBarra(event, settings, beverages ?? []);
     const staffTotal = computeEventStaff(staff ?? []).total;
-    return computeEventSummary(event, mp, barra, costs ?? [], staffTotal);
-  }, [event, selections, settings, beverages, costs, staff]);
+    const vajillaTotal = computeVajillaTotal(tableware ?? []);
+    return computeEventSummary(event, mp, barra, costs ?? [], staffTotal, vajillaTotal);
+  }, [event, selections, settings, beverages, costs, staff, tableware]);
 
   return (
     <Card className="border-primary/30">

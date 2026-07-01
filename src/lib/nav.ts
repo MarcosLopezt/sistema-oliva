@@ -5,6 +5,7 @@ import {
   Carrot,
   Users,
   Settings,
+  UtensilsCrossed,
   type LucideIcon,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Eventos", icon: CalendarDays },
   { href: "/recetas", label: "Recetas", icon: BookOpen },
   { href: "/proveedores", label: "Proveedores", icon: Truck },
+  { href: "/vajilla", label: "Vajilla", icon: UtensilsCrossed },
   { href: "/personal", label: "Personal", icon: Users },
   { href: "/ingredientes", label: "Ingredientes", icon: Carrot },
   { href: "/configuracion", label: "Configuración", icon: Settings },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { TriangleAlert, Store, Send } from "lucide-react";
+import { TriangleAlert, Store, Send, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -16,7 +16,9 @@ import { ProviderOrderDialog } from "@/components/eventos/provider-order-dialog"
 import {
   computeMateriaPrima,
   buildProviderOrderMessage,
+  isSurplusSignificant,
   type MPGroup,
+  type MPLine,
 } from "@/lib/materia-prima";
 import { useMarketPriceUpdater } from "@/lib/hooks";
 import { isAutoMarket, marketPriceLabel } from "@/lib/market-price";
@@ -39,7 +41,6 @@ export function MateriaPrimaSection({
     [event, selections],
   );
 
-  // Ingredientes únicos del menú, para buscar etiquetas y precios de mercado.
   const ingredientsById = useMemo(() => {
     const map = new Map<string, IngredientWithProduct>();
     for (const sel of selections) {
@@ -50,7 +51,6 @@ export function MateriaPrimaSection({
     return map;
   }, [selections]);
 
-  // Ingredientes sin proveedor fijo con búsqueda automática activada.
   const autoIngredients = useMemo(
     () => [...ingredientsById.values()].filter(isAutoMarket),
     [ingredientsById],
@@ -59,6 +59,15 @@ export function MateriaPrimaSection({
   const failed = useMarketPriceUpdater(event.id, autoIngredients);
 
   const [orderGroup, setOrderGroup] = useState<MPGroup | null>(null);
+
+  // Líneas con sobrante significativo (solo modelo tres capas).
+  const surplusLines = useMemo(
+    () =>
+      mp.groups
+        .flatMap((g) => g.lines)
+        .filter(isSurplusSignificant),
+    [mp.groups],
+  );
 
   if (selections.length === 0) {
     return (
@@ -101,6 +110,38 @@ export function MateriaPrimaSection({
               {mp.problems.map((p, i) => (
                 <li key={i}>
                   {p.ingredientName} — {p.reason}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Alerta informativa de sobrante (color suave, nunca de error) */}
+      {surplusLines.length > 0 && (
+        <Card className="border-sky-200 bg-sky-50 dark:bg-sky-950/20">
+          <CardContent className="flex flex-col gap-1 py-4 text-sm">
+            <div className="flex items-center gap-2 font-medium text-sky-700 dark:text-sky-400">
+              <Info className="size-4" />
+              Sobrante previsto — info para decidir
+            </div>
+            <ul className="ml-6 list-disc text-sky-700/90 dark:text-sky-400/90">
+              {surplusLines.map((l) => (
+                <li key={l.ingredientId}>
+                  <span className="font-medium">{l.ingredientName}</span>: vas a
+                  pedir{" "}
+                  <span className="font-medium">
+                    {formatNum(l.buyQty)} {l.saleUnit ?? l.buyUnitLabel}
+                  </span>{" "}
+                  ({formatNum(l.totalBaseQty)} un en total) pero solo necesitás{" "}
+                  <span className="font-medium">
+                    {formatNum(l.unitsNeeded!)} un
+                  </span>
+                  . Te sobran{" "}
+                  <span className="font-medium">
+                    {formatNum(l.surplusUnits!)} un
+                  </span>
+                  .
                 </li>
               ))}
             </ul>
@@ -169,7 +210,7 @@ export function MateriaPrimaSection({
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {formatNum(l.buyQty)} {l.buyUnitLabel}
+                      <BuyQtyCell line={l} />
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {formatARS(l.priceEach)}
@@ -197,5 +238,31 @@ export function MateriaPrimaSection({
         }
       />
     </div>
+  );
+}
+
+/**
+ * Celda "Comprar" que muestra:
+ * - Modelo directo: "X pack Y kg" (comportamiento anterior).
+ * - Modelo tres capas: "X caja" con subtexto "Y un necesarias".
+ */
+function BuyQtyCell({ line }: { line: MPLine }) {
+  if (line.unitsNeeded != null && line.unitsPerPack != null) {
+    // Tres capas: mostrar cajas + unidades por separado.
+    return (
+      <div className="flex flex-col items-end gap-0.5">
+        <span>
+          {formatNum(line.buyQty)} {line.saleUnit ?? line.buyUnitLabel}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {formatNum(line.unitsNeeded)} un necesarias
+        </span>
+      </div>
+    );
+  }
+  return (
+    <span>
+      {formatNum(line.buyQty)} {line.buyUnitLabel}
+    </span>
   );
 }

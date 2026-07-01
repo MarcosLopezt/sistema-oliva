@@ -54,6 +54,24 @@ function rowCost(row: Row): number | null {
   return up * q;
 }
 
+/** Texto explicativo para cuando el costo del ítem es null. */
+function costUnavailableReason(row: Row): string {
+  const ing = row.ingredient;
+  if (unitDimension(row.unit) !== unitDimension(ing.base_unit)) {
+    return "La unidad de la receta no coincide con la del ingrediente";
+  }
+  if (!ing.product && ing.market_price == null) {
+    return "Ingrediente sin precio — vinculá un producto o cargá precio de mercado";
+  }
+  if (ing.product) {
+    const { base_unit, unit_content_value } = ing.product;
+    if (base_unit === "un" && !unit_content_value) {
+      return "El producto está en unidades — configurá su contenido por unidad (ml o g) en la ficha del producto";
+    }
+  }
+  return "Ingrediente sin precio";
+}
+
 export function RecipeEditor({ recipeId }: { recipeId?: string }) {
   const { data, isLoading } = useRecipe(recipeId);
 
@@ -308,9 +326,6 @@ function EditorForm({ recipe }: { recipe: RecipeWithItems | null }) {
             <div className="flex flex-col divide-y">
               {rows.map((row) => {
                 const c = rowCost(row);
-                const dimMismatch =
-                  unitDimension(row.unit) !==
-                  unitDimension(row.ingredient.base_unit);
                 return (
                   <div
                     key={row.key}
@@ -344,11 +359,7 @@ function EditorForm({ recipe }: { recipe: RecipeWithItems | null }) {
                       {c == null ? (
                         <span
                           className="text-amber-600"
-                          title={
-                            dimMismatch
-                              ? "La unidad no coincide con la del ingrediente"
-                              : "Ingrediente sin precio (vinculá un producto o cargá precio de mercado)"
-                          }
+                          title={costUnavailableReason(row)}
                         >
                           sin costo
                         </span>

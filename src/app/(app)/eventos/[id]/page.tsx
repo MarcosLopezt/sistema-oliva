@@ -23,12 +23,15 @@ import { MateriaPrimaSection } from "@/components/eventos/materia-prima-section"
 import { BarraSection } from "@/components/eventos/barra-section";
 import { CostSection } from "@/components/eventos/cost-section";
 import { EventStaffSection } from "@/components/eventos/event-staff-section";
+import { EventVajillaSection } from "@/components/eventos/event-vajilla-section";
+import { EventVajillaParams } from "@/components/eventos/event-vajilla-params";
 import { EventSummary } from "@/components/eventos/event-summary";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   useEvent,
   useEventRecipes,
   useEventCosts,
+  useEventTableware,
   useUpdateEvent,
   useDeleteEvent,
 } from "@/lib/hooks";
@@ -40,6 +43,7 @@ export default function EventoDetailPage() {
   const { data: event, isLoading } = useEvent(id);
   const { data: selections } = useEventRecipes(id);
   const { data: costs } = useEventCosts(id);
+  const { data: tableware } = useEventTableware(id);
   const update = useUpdateEvent();
   const del = useDeleteEvent();
 
@@ -169,10 +173,19 @@ export default function EventoDetailPage() {
 
         <div>
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">
+            Vajilla
+          </h2>
+          <div className="flex flex-col gap-4">
+            <EventVajillaParams event={event} tableware={tableware ?? []} />
+            <EventVajillaSection event={event} />
+          </div>
+        </div>
+
+        <div>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-primary">
             Otros costos
           </h2>
           <div className="flex flex-col gap-4">
-            <CostSection eventId={event.id} section="vajilla" costs={costs ?? []} />
             <CostSection eventId={event.id} section="instalacion" costs={costs ?? []} />
             <CostSection eventId={event.id} section="extra" costs={costs ?? []} />
             <CostSection eventId={event.id} section="adicional" costs={costs ?? []} />
