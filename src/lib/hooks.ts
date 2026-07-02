@@ -7,12 +7,17 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import * as q from "@/lib/queries";
+import type { UpsertResult, TablewareUpsertResult } from "@/lib/queries";
 import {
   fetchMarketPrice,
   isStaleAuto,
   isStaleAutoBeverage,
 } from "@/lib/market-price";
-import type { IngredientWithProduct, BarBeverage } from "@/lib/types";
+import type {
+  IngredientWithProduct,
+  BarBeverage,
+  TablewareItemWithProvider,
+} from "@/lib/types";
 import type {
   ProviderInput,
   ProductInput,
@@ -27,6 +32,9 @@ import type {
   EventCostInput,
   StaffInput,
   EventStaffInput,
+  TablewareProviderInput,
+  TablewareItemInput,
+  EventTablewareInput,
 } from "@/lib/types";
 
 export const keys = {
@@ -46,6 +54,13 @@ export const keys = {
   staff: ["staff"] as const,
   eventStaff: (id: string) => ["events", id, "staff"] as const,
   staffPayments: ["staff", "payments"] as const,
+  tablewareProviders: ["tableware_providers"] as const,
+  tablewareItems: (providerId?: string) =>
+    providerId
+      ? (["tableware_items", providerId] as const)
+      : (["tableware_items"] as const),
+  allTablewareItems: ["tableware_items"] as const,
+  eventTableware: (id: string) => ["events", id, "tableware"] as const,
 };
 
 // ----------------------------- Proveedores -----------------------------
@@ -127,6 +142,14 @@ export function useBulkInsertProducts() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (rows: ProductInput[]) => q.bulkInsertProducts(rows),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+  });
+}
+
+export function useBulkUpsertProducts() {
+  const qc = useQueryClient();
+  return useMutation<UpsertResult, Error, { providerId: string; rows: ProductInput[] }>({
+    mutationFn: ({ providerId, rows }) => q.bulkUpsertProducts(providerId, rows),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
   });
 }
@@ -501,6 +524,178 @@ export function useStaffPayments() {
   return useQuery({
     queryKey: keys.staffPayments,
     queryFn: q.listStaffPayments,
+  });
+}
+
+// --------------------------- Vajilla ----------------------------
+
+export function useTablewareProviders() {
+  return useQuery({
+    queryKey: keys.tablewareProviders,
+    queryFn: q.listTablewareProviders,
+  });
+}
+
+export function useCreateTablewareProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TablewareProviderInput) =>
+      q.createTablewareProvider(input),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: keys.tablewareProviders }),
+  });
+}
+
+export function useUpdateTablewareProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: TablewareProviderInput;
+    }) => q.updateTablewareProvider(id, input),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: keys.tablewareProviders }),
+  });
+}
+
+export function useDeleteTablewareProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => q.deleteTablewareProvider(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.tablewareProviders });
+      qc.invalidateQueries({ queryKey: keys.allTablewareItems });
+    },
+  });
+}
+
+export function useTablewareItems(providerId?: string) {
+  return useQuery({
+    queryKey: keys.tablewareItems(providerId),
+    queryFn: () => q.listTablewareItems(providerId),
+  });
+}
+
+export function useAllTablewareItems() {
+  return useQuery<TablewareItemWithProvider[]>({
+    queryKey: keys.allTablewareItems,
+    queryFn: q.listTablewareItemsWithProvider,
+  });
+}
+
+export function useCreateTablewareItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TablewareItemInput) => q.createTablewareItem(input),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["tableware_items"] }),
+  });
+}
+
+export function useUpdateTablewareItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: Partial<TablewareItemInput>;
+    }) => q.updateTablewareItem(id, input),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["tableware_items"] }),
+  });
+}
+
+export function useDeleteTablewareItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => q.deleteTablewareItem(id),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["tableware_items"] }),
+  });
+}
+
+export function useBulkUpsertTablewareItems() {
+  const qc = useQueryClient();
+  return useMutation<
+    TablewareUpsertResult,
+    Error,
+    { providerId: string; rows: TablewareItemInput[] }
+  >({
+    mutationFn: ({ providerId, rows }) =>
+      q.bulkUpsertTablewareItems(providerId, rows),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["tableware_items"] }),
+  });
+}
+
+export function useEventTableware(eventId: string | undefined) {
+  return useQuery({
+    queryKey: keys.eventTableware(eventId ?? ""),
+    queryFn: () => q.listEventTableware(eventId!),
+    enabled: !!eventId,
+  });
+}
+
+export function useAddEventTableware() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      eventId,
+      input,
+    }: {
+      eventId: string;
+      input: EventTablewareInput;
+    }) => q.addEventTableware(eventId, input),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: keys.eventTableware(vars.eventId) }),
+  });
+}
+
+export function useUpdateEventTableware() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      eventId: string;
+      input: Partial<EventTablewareInput>;
+    }) => q.updateEventTableware(id, input),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: keys.eventTableware(vars.eventId) }),
+  });
+}
+
+export function useRemoveEventTableware() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string; eventId: string }) =>
+      q.removeEventTableware(id),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: keys.eventTableware(vars.eventId) }),
+  });
+}
+
+export function useRecalcNonManualTableware() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      eventId,
+      pax,
+      globalMargin,
+    }: {
+      eventId: string;
+      pax: number;
+      globalMargin: number;
+    }) => q.recalcNonManualTableware(eventId, pax, globalMargin),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: keys.eventTableware(vars.eventId) }),
   });
 }
 

@@ -36,9 +36,10 @@ import {
   type SheetGrid,
   type ProductField,
 } from "@/lib/excel";
-import { useBulkInsertProducts } from "@/lib/hooks";
+import { useBulkUpsertProducts } from "@/lib/hooks";
 import { UNITS, type ProductInput, type UnitKind } from "@/lib/types";
 import { formatARS, formatNum, unitLabel } from "@/lib/format";
+import { parseUnitContentFromName } from "@/lib/unit-content-parser";
 
 const NONE = "-1";
 
@@ -79,7 +80,7 @@ export function ExcelImportDialog({
   onOpenChange: (open: boolean) => void;
   providerId: string;
 }) {
-  const bulk = useBulkInsertProducts();
+  const upsert = useBulkUpsertProducts();
   const [grid, setGrid] = useState<SheetGrid | null>(null);
   const [sheet, setSheet] = useState("");
   const [headerRow, setHeaderRow] = useState(0);
@@ -180,7 +181,21 @@ export function ExcelImportDialog({
       let presentationRaw: string | null = null;
       let suggestedQty: number | null = null;
 
-      if (presi >= 0 && (r[presi] || "").trim()) {
+      // Prioridad 1: columna "Contenido" explícita (dato más confiable).
+      const contentColRaw = cti >= 0 ? (r[cti] || "").trim() : "";
+      const contentColParsed = contentColRaw ? parseContent(contentColRaw) : null;
+
+      if (contentColParsed) {
+        baseUnit = contentColParsed.baseUnit;
+        packSize = contentColParsed.packSize;
+        status = "ok";
+        // Columna de presentación determina la unidad de venta (ej "bolsa", "cabeza").
+        if (presi >= 0 && (r[presi] || "").trim()) {
+          const p = parsePresentation((r[presi] || "").trim());
+          saleUnit = saleUnitLabel || p.envase || (r[presi] || "").trim() || null;
+        }
+      } else if (presi >= 0 && (r[presi] || "").trim()) {
+        // Prioridad 2: columna "Presentación" con texto libre.
         const raw = (r[presi] || "").trim();
         const p = parsePresentation(raw);
         const content = presentationToContent(p);
@@ -209,13 +224,6 @@ export function ExcelImportDialog({
           saleUnit = saleUnitLabel || raw;
           status = "fallback";
         }
-      } else if (cti >= 0) {
-        const c = parseContent(r[cti] ?? "");
-        if (c) {
-          baseUnit = c.baseUnit;
-          packSize = c.packSize;
-          status = "ok";
-        }
       }
 
       out.push({
@@ -242,6 +250,17 @@ export function ExcelImportDialog({
 
   function toInput(a: Analyzed): ProductInput {
     const c = finalContent(a);
+    // Auto-detectar contenido por unidad desde el nombre cuando el producto
+    // está en 'un' (unidades). Permite calcular costos proporcionales luego.
+    let unit_content_value: number | null = null;
+    let unit_content_unit: UnitKind | null = null;
+    if (c.baseUnit === "un") {
+      const detected = parseUnitContentFromName(a.name);
+      if (detected) {
+        unit_content_value = detected.value;
+        unit_content_unit = detected.unit;
+      }
+    }
     return {
       provider_id: providerId,
       name: a.name,
@@ -251,6 +270,8 @@ export function ExcelImportDialog({
       price: a.price,
       sale_unit: a.saleUnit,
       price_includes_iva: iva,
+      unit_content_value,
+      unit_content_unit,
     };
   }
 
@@ -266,12 +287,27 @@ export function ExcelImportDialog({
       return;
     }
     try {
-      const n = await bulk.mutateAsync(analyzed.map(toInput));
-      toast.success(`${n} productos importados.`, {
-        description:
-          reviewRows.length > 0
-            ? `${reviewRows.length} quedaron marcados para revisar el contenido.`
-            : undefined,
+      const { inserted, updated, priceChanges } = await upsert.mutateAsync({
+        providerId,
+        rows: analyzed.map(toInput),
+      });
+      const parts: string[] = [];
+      if (inserted > 0) parts.push(`${inserted} nuevo${inserted !== 1 ? "s" : ""}`);
+      if (updated > 0) parts.push(`${updated} actualizado${updated !== 1 ? "s" : ""}`);
+      const summary = parts.join(", ") || "sin cambios";
+
+      const descParts: string[] = [];
+      if (reviewRows.length > 0)
+        descParts.push(`${reviewRows.length} requieren revisión del contenido.`);
+      if (priceChanges.length > 0)
+        descParts.push(
+          `Cambios de precio: ${priceChanges
+            .map((c) => `${c.name}: ${formatARS(c.oldPrice)} → ${formatARS(c.newPrice)}`)
+            .join("; ")}.`,
+        );
+
+      toast.success(`Importación completada: ${summary}.`, {
+        description: descParts.length > 0 ? descParts.join(" ") : undefined,
       });
       reset();
       onOpenChange(false);
@@ -550,9 +586,9 @@ export function ExcelImportDialog({
           {grid && (
             <Button
               onClick={handleImport}
-              disabled={bulk.isPending || missingRequired || analyzed.length === 0}
+              disabled={upsert.isPending || missingRequired || analyzed.length === 0}
             >
-              {bulk.isPending ? "Importando…" : `Importar ${analyzed.length} productos`}
+              {upsert.isPending ? "Importando…" : `Importar ${analyzed.length} productos`}
             </Button>
           )}
         </DialogFooter>

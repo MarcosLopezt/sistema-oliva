@@ -86,9 +86,9 @@ export type ProductField =
 const HEADER_SYNONYMS: Record<ProductField, RegExp> = {
   name: /(producto|descrip|art[ií]culo|^item$|nombre|detalle)/,
   price: /(precio|costo|valor|importe)/,
-  code: /(c[oó]digo|^cod\.?$|sku)/,
+  code: /(c[oó]digo|^cod\.?$|sku|^art\.?$|referencia|^ref\.?$)/,
   content:
-    /(cant\.?\s*(por|x)\s*unidad|cantidad\s*(por|x)\s*unidad|contenido|gramaje|peso\s*neto|^peso$|^pack$|^cant\.?$|^cantidad$)/,
+    /(cant\.?\s*(por|x)\s*unidad|cantidad\s*(por|x)\s*unidad|contenido\s*(neto)?|gramaje|peso\s*neto|^peso$|^pack$|^cant\.?$|^cantidad(\s*neta?)?$|^cont\.?$)/,
   presentation: /(presentaci[oó]n|formato|empaque|^envase$|^present\.?$)/,
   saleUnit:
     /(unidad\s*de\s*venta|^unidad(es)?$|^und\.?$|^u\.?\s*m\.?$|^medida$)/,

@@ -29,6 +29,14 @@ import type {
   EventStaffInput,
   EventStaffWithStaff,
   EventStaffWithEvent,
+  TablewareProvider,
+  TablewareProviderInput,
+  TablewareItem,
+  TablewareItemWithProvider,
+  TablewareItemInput,
+  EventTableware,
+  EventTablewareWithItem,
+  EventTablewareInput,
 } from "@/lib/types";
 
 const db = () => createClient();
@@ -121,6 +129,91 @@ export async function bulkInsertProducts(
     .insert(rows, { count: "exact" });
   if (error) throw new Error(error.message);
   return count ?? rows.length;
+}
+
+export type UpsertResult = {
+  inserted: number;
+  updated: number;
+  priceChanges: Array<{ name: string; oldPrice: number; newPrice: number }>;
+};
+
+function normalizeName(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Upsert de lista de precios: detecta productos existentes del proveedor por código
+ * (si lo hay) o por nombre normalizado, los actualiza con los nuevos datos, e inserta
+ * los que no tienen coincidencia. Preserva IDs y vínculos con recetas.
+ */
+export async function bulkUpsertProducts(
+  providerId: string,
+  rows: ProductInput[],
+): Promise<UpsertResult> {
+  if (rows.length === 0) return { inserted: 0, updated: 0, priceChanges: [] };
+
+  const { data: existing, error } = await db()
+    .from("products")
+    .select("id, code, name, price")
+    .eq("provider_id", providerId);
+  if (error) throw new Error(error.message);
+
+  type ExistingRow = { id: string; code: string | null; name: string; price: number };
+  const byCode = new Map<string, ExistingRow>();
+  const byName = new Map<string, ExistingRow>();
+  for (const p of (existing ?? []) as ExistingRow[]) {
+    if (p.code) byCode.set(p.code.trim(), p);
+    byName.set(normalizeName(p.name), p);
+  }
+
+  const toInsert: ProductInput[] = [];
+  type UpdateEntry = { id: string; input: Partial<ProductInput>; oldPrice: number; name: string };
+  const toUpdate: UpdateEntry[] = [];
+
+  for (const row of rows) {
+    let match: ExistingRow | undefined;
+    if (row.code) match = byCode.get(row.code.trim());
+    if (!match) match = byName.get(normalizeName(row.name));
+
+    if (match) {
+      toUpdate.push({
+        id: match.id,
+        oldPrice: match.price,
+        name: match.name,
+        input: {
+          price: row.price,
+          base_unit: row.base_unit,
+          pack_size: row.pack_size,
+          sale_unit: row.sale_unit ?? null,
+          price_includes_iva: row.price_includes_iva ?? false,
+          unit_content_value: row.unit_content_value ?? null,
+          unit_content_unit: row.unit_content_unit ?? null,
+          ...(row.code != null ? { code: row.code } : {}),
+        },
+      });
+    } else {
+      toInsert.push(row);
+    }
+  }
+
+  if (toInsert.length > 0) {
+    const { error: insertErr } = await db().from("products").insert(toInsert);
+    if (insertErr) throw new Error(insertErr.message);
+  }
+
+  const priceChanges: UpsertResult["priceChanges"] = [];
+  for (const u of toUpdate) {
+    const { error: updateErr } = await db()
+      .from("products")
+      .update(u.input)
+      .eq("id", u.id);
+    if (updateErr) throw new Error(updateErr.message);
+    if (u.input.price !== u.oldPrice) {
+      priceChanges.push({ name: u.name, oldPrice: u.oldPrice, newPrice: u.input.price! });
+    }
+  }
+
+  return { inserted: toInsert.length, updated: toUpdate.length, priceChanges };
 }
 
 // ----------------------------- Ingredientes -----------------------------
@@ -567,4 +660,278 @@ export async function listStaffPayments(): Promise<EventStaffWithEvent[]> {
     .select("*, staff:staff(*), event:events(id, name, event_date)");
   if (error) throw new Error(error.message);
   return (data as unknown as EventStaffWithEvent[]) ?? [];
+}
+
+// --------------------------- Vajilla ----------------------------
+
+export async function listTablewareProviders(): Promise<TablewareProvider[]> {
+  const { data, error } = await db()
+    .from("tableware_providers")
+    .select("*")
+    .order("name");
+  return check(data, error);
+}
+
+export async function createTablewareProvider(
+  input: TablewareProviderInput,
+): Promise<TablewareProvider> {
+  const { data, error } = await db()
+    .from("tableware_providers")
+    .insert(input)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+export async function updateTablewareProvider(
+  id: string,
+  input: TablewareProviderInput,
+): Promise<TablewareProvider> {
+  const { data, error } = await db()
+    .from("tableware_providers")
+    .update(input)
+    .eq("id", id)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+export async function deleteTablewareProvider(id: string): Promise<void> {
+  const { error } = await db().from("tableware_providers").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+const TABLEWARE_ITEM_SELECT =
+  "*, provider:tableware_providers(id, name, phone)";
+
+export async function listTablewareItems(
+  providerId?: string,
+): Promise<TablewareItem[]> {
+  let q = db().from("tableware_items").select("*").order("name");
+  if (providerId) q = q.eq("provider_id", providerId);
+  const { data, error } = await q;
+  return check(data, error);
+}
+
+export async function listTablewareItemsWithProvider(): Promise<
+  TablewareItemWithProvider[]
+> {
+  const { data, error } = await db()
+    .from("tableware_items")
+    .select(TABLEWARE_ITEM_SELECT)
+    .order("name");
+  return check(data, error) as unknown as TablewareItemWithProvider[];
+}
+
+export async function createTablewareItem(
+  input: TablewareItemInput,
+): Promise<TablewareItem> {
+  const { data, error } = await db()
+    .from("tableware_items")
+    .insert(input)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+export async function updateTablewareItem(
+  id: string,
+  input: Partial<TablewareItemInput>,
+): Promise<TablewareItem> {
+  const { data, error } = await db()
+    .from("tableware_items")
+    .update(input)
+    .eq("id", id)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+export async function deleteTablewareItem(id: string): Promise<void> {
+  const { error } = await db().from("tableware_items").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export type TablewareUpsertResult = {
+  inserted: number;
+  updated: number;
+};
+
+/** Upsert de catálogo: detecta ítems existentes del proveedor por nombre normalizado. */
+export async function bulkUpsertTablewareItems(
+  providerId: string,
+  rows: TablewareItemInput[],
+): Promise<TablewareUpsertResult> {
+  if (rows.length === 0) return { inserted: 0, updated: 0 };
+
+  const { data: existing, error } = await db()
+    .from("tableware_items")
+    .select("id, name")
+    .eq("provider_id", providerId);
+  if (error) throw new Error(error.message);
+
+  type Existing = { id: string; name: string };
+  const byName = new Map<string, Existing>();
+  for (const p of (existing ?? []) as Existing[]) {
+    byName.set(p.name.trim().toLowerCase().replace(/\s+/g, " "), p);
+  }
+
+  const toInsert: TablewareItemInput[] = [];
+  const toUpdate: { id: string; input: Partial<TablewareItemInput> }[] = [];
+
+  for (const row of rows) {
+    const key = row.name.trim().toLowerCase().replace(/\s+/g, " ");
+    const match = byName.get(key);
+    if (match) {
+      toUpdate.push({
+        id: match.id,
+        input: {
+          unit_price: row.unit_price,
+          category: row.category,
+          cost_type: row.cost_type,
+        },
+      });
+    } else {
+      toInsert.push(row);
+    }
+  }
+
+  if (toInsert.length > 0) {
+    const { error: insertErr } = await db()
+      .from("tableware_items")
+      .insert(toInsert);
+    if (insertErr) throw new Error(insertErr.message);
+  }
+
+  for (const u of toUpdate) {
+    const { error: updateErr } = await db()
+      .from("tableware_items")
+      .update(u.input)
+      .eq("id", u.id);
+    if (updateErr) throw new Error(updateErr.message);
+  }
+
+  return { inserted: toInsert.length, updated: toUpdate.length };
+}
+
+// ------------------- Vajilla en el evento -------------------
+
+const EVENT_TABLEWARE_SELECT =
+  "*, item:tableware_items(*, provider:tableware_providers(id, name, phone))";
+
+export async function listEventTableware(
+  eventId: string,
+): Promise<EventTablewareWithItem[]> {
+  const { data, error } = await db()
+    .from("event_tableware")
+    .select(EVENT_TABLEWARE_SELECT)
+    .eq("event_id", eventId)
+    .order("created_at");
+  if (error) throw new Error(error.message);
+  return (data as unknown as EventTablewareWithItem[]) ?? [];
+}
+
+export async function addEventTableware(
+  eventId: string,
+  input: EventTablewareInput,
+): Promise<EventTablewareWithItem> {
+  const { data, error } = await db()
+    .from("event_tableware")
+    .insert({ ...input, event_id: eventId })
+    .select(EVENT_TABLEWARE_SELECT)
+    .single();
+  return check(data, error) as unknown as EventTablewareWithItem;
+}
+
+export async function updateEventTableware(
+  id: string,
+  input: Partial<EventTablewareInput>,
+): Promise<void> {
+  const { error } = await db()
+    .from("event_tableware")
+    .update(input)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function removeEventTableware(id: string): Promise<void> {
+  const { error } = await db().from("event_tableware").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Cantidad sugerida de vajilla para un ítem:
+ * ceil(personas × multiplicador) + margen
+ */
+export function calcSuggestedQty(
+  pax: number,
+  multiplier: number,
+  margin: number,
+): number {
+  return Math.ceil(pax * multiplier) + Math.round(margin);
+}
+
+/**
+ * Recalcula las cantidades de los ítems de vajilla NO editados manualmente.
+ * Retorna la cantidad de filas actualizadas.
+ */
+export async function recalcNonManualTableware(
+  eventId: string,
+  pax: number,
+  globalMargin: number,
+): Promise<number> {
+  const { data, error } = await db()
+    .from("event_tableware")
+    .select("id, multiplier, margin_override")
+    .eq("event_id", eventId)
+    .eq("quantity_manual", false);
+  if (error) throw new Error(error.message);
+
+  const rows = (data ?? []) as Array<{
+    id: string;
+    multiplier: number;
+    margin_override: number | null;
+  }>;
+
+  for (const row of rows) {
+    const margin = row.margin_override ?? globalMargin;
+    const quantity = calcSuggestedQty(pax, row.multiplier, margin);
+    const { error: upErr } = await db()
+      .from("event_tableware")
+      .update({ quantity })
+      .eq("id", row.id);
+    if (upErr) throw new Error(upErr.message);
+  }
+
+  return rows.length;
+}
+
+/** Calcula el costo de vajilla para un evento dado su listado de ítems. */
+export function computeVajillaTotal(items: EventTablewareWithItem[]): number {
+  return items.reduce((sum, e) => {
+    if (!e.item) return sum;
+    if (e.item.cost_type === "alquiler") {
+      return sum + (e.quantity + e.breakage_qty) * e.item.unit_price;
+    }
+    // compra: solo se carga si el usuario lo habilitó para este evento
+    return sum + (e.charge_purchase ? e.quantity * e.item.unit_price : 0);
+  }, 0);
+}
+
+/** Genera el mensaje de pedido de vajilla para el proveedor. */
+export function buildVajillaOrderMessage(
+  providerName: string,
+  eventName: string,
+  items: EventTablewareWithItem[],
+): string {
+  const lines = items.map((e) => {
+    const qty = e.quantity + (e.item?.cost_type === "alquiler" ? e.breakage_qty : 0);
+    return `• ${e.item?.name ?? "—"}: ${qty} un.`;
+  });
+  return [
+    `Pedido de vajilla — ${eventName}`,
+    `Proveedor: ${providerName}`,
+    "",
+    ...lines,
+  ].join("\n");
 }

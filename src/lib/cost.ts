@@ -31,15 +31,42 @@ export function convert(
  * Precio por unidad base del ingrediente.
  * Prioriza el producto vinculado; si no hay, usa el precio de mercado.
  * Devuelve null si no se puede determinar (sin precio o unidades incompatibles).
+ *
+ * Soporta dos caminos:
+ *  1) Directo: dimensiones de ingrediente y producto coinciden (ej: kg ↔ kg).
+ *  2) Vía unit_content: producto en 'un' con contenido por unidad (ej: botella 700 ml).
+ *     En este caso el precio se fracciona proporcionalmente: $ por ml.
  */
 export function ingredientUnitPrice(
   ing: IngredientWithProduct,
 ): number | null {
   if (ing.product) {
-    const perProductUnit = ing.product.price / ing.product.pack_size;
-    const factor = convert(1, ing.base_unit, ing.product.base_unit);
-    if (factor == null) return null; // dimensiones incompatibles
-    return perProductUnit * factor;
+    const prod = ing.product;
+
+    // Camino 1: conversión directa entre dimensiones compatibles.
+    const directFactor = convert(1, ing.base_unit, prod.base_unit);
+    if (directFactor != null) {
+      const pricePerProductUnit = prod.price / prod.pack_size;
+      return pricePerProductUnit * directFactor;
+    }
+
+    // Camino 2: producto en 'un' con contenido (volumen/masa) por unidad.
+    // Permite costear una receta con 10 ml cuando el producto es "botella de 700 ml".
+    if (prod.unit_content_value && prod.unit_content_unit) {
+      const contentFactor = convert(
+        1,
+        ing.base_unit,
+        prod.unit_content_unit as UnitKind,
+      );
+      if (contentFactor != null) {
+        // $ por unidad de venta (ej: botella) ÷ contenido → $ por ml (o g).
+        const pricePerUnit = prod.price / prod.pack_size;
+        const pricePerContentUnit = pricePerUnit / prod.unit_content_value;
+        return pricePerContentUnit * contentFactor;
+      }
+    }
+
+    return null; // dimensiones incompatibles sin solución
   }
   if (ing.market_price != null) return ing.market_price;
   return null;
