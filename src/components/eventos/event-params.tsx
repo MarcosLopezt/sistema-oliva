@@ -50,7 +50,12 @@ export function EventParams({ event }: { event: EventRow }) {
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <Field label="Bocados x persona" value={bocados} onChange={setBocados} />
-          <Field label="Extra principal" value={extra} onChange={setExtra} />
+          <Field
+            label="Cubiertos extra"
+            hint="Se suman a principales y bocados"
+            value={extra}
+            onChange={setExtra}
+          />
           <Field label="% Veggie" value={veggie} onChange={setVeggie} suffix="%" />
           <Field label="% Merma" value={merma} onChange={setMerma} suffix="%" />
           <Field label="% Margen" value={margin} onChange={setMargin} suffix="%" />
@@ -70,11 +75,13 @@ function Field({
   value,
   onChange,
   suffix,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   suffix?: string;
+  hint?: string;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -92,6 +99,11 @@ function Field({
           </span>
         )}
       </div>
+      {hint && (
+        <span className="text-[11px] leading-tight text-muted-foreground">
+          {hint}
+        </span>
+      )}
     </div>
   );
 }

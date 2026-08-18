@@ -5,6 +5,10 @@ import {
   type RecipeItemWithIngredient,
 } from "@/lib/types";
 
+// NOTA: este módulo es la única fuente de verdad del costeo. Toda pantalla que
+// muestre un precio de ingrediente o un costo de receta debe usar estas
+// funciones — no recalcular a mano — para que no vuelvan a divergir.
+
 /** Factor a la unidad base de cada dimensión (masa→g, volumen→ml, conteo→un). */
 const FACTOR: Record<UnitKind, number> = {
   g: 1,
@@ -53,11 +57,7 @@ export function ingredientUnitPrice(
     // Camino 2: producto en 'un' con contenido (volumen/masa) por unidad.
     // Permite costear una receta con 10 ml cuando el producto es "botella de 700 ml".
     if (prod.unit_content_value && prod.unit_content_unit) {
-      const contentFactor = convert(
-        1,
-        ing.base_unit,
-        prod.unit_content_unit as UnitKind,
-      );
+      const contentFactor = convert(1, ing.base_unit, prod.unit_content_unit);
       if (contentFactor != null) {
         // $ por unidad de venta (ej: botella) ÷ contenido → $ por ml (o g).
         const pricePerUnit = prod.price / prod.pack_size;
@@ -72,14 +72,69 @@ export function ingredientUnitPrice(
   return null;
 }
 
-/** Costo de un ítem de receta (cantidad del lote × precio del ingrediente). */
-export function recipeItemCost(item: RecipeItemWithIngredient): number | null {
+/**
+ * Motivo por el que un ingrediente no se puede costear, o null si está bien.
+ *
+ * Es el complemento exacto de `ingredientUnitPrice`: devuelve un texto
+ * justamente cuando esa función devuelve null. Atar las alertas de la UI a
+ * esta función evita el falso positivo de comparar dimensiones a mano, que
+ * marcaba como rotos los productos que usan el modelo de tres capas
+ * (producto en 'un' + contenido por unidad), que son casos válidos.
+ */
+export function ingredientPriceIssue(ing: IngredientWithProduct): string | null {
+  if (ingredientUnitPrice(ing) != null) return null;
+
+  const prod = ing.product;
+  if (!prod) {
+    return "Sin precio: vinculá un producto de proveedor o cargá un precio de mercado.";
+  }
+  if (prod.base_unit === "un" && !prod.unit_content_value) {
+    return `El producto se vende por unidad y no tiene contenido cargado. Editá el producto e indicá cuánto (${ing.base_unit}) trae cada unidad.`;
+  }
+  const contenido = prod.unit_content_unit
+    ? `, contenido en ${prod.unit_content_unit}`
+    : "";
+  return `La unidad del ingrediente (${ing.base_unit}) no es compatible con la del producto (${prod.base_unit}${contenido}).`;
+}
+
+/**
+ * Forma mínima necesaria para costear una línea: cantidad + unidad + ingrediente.
+ * La cumplen tanto los ítems guardados (`RecipeItemWithIngredient`) como las
+ * filas en edición del editor de recetas, así que ambos usan el mismo cálculo.
+ */
+export type CostableItem = {
+  quantity: number;
+  unit: UnitKind;
+  ingredient: IngredientWithProduct | null;
+};
+
+/** Costo de una línea de receta (cantidad del lote × precio del ingrediente). */
+export function itemCost(item: CostableItem): number | null {
   if (!item.ingredient) return null;
   const qty = convert(item.quantity, item.unit, item.ingredient.base_unit);
   if (qty == null) return null;
   const unitPrice = ingredientUnitPrice(item.ingredient);
   if (unitPrice == null) return null;
   return qty * unitPrice;
+}
+
+/** Costo de un ítem de receta ya guardado. Alias tipado de `itemCost`. */
+export function recipeItemCost(item: RecipeItemWithIngredient): number | null {
+  return itemCost(item);
+}
+
+/**
+ * Motivo por el que una línea de receta no se puede costear, o null si está bien.
+ * Complemento exacto de `itemCost`: primero mira la unidad elegida en la receta
+ * y después delega en `ingredientPriceIssue` (que cubre el resto de los casos).
+ */
+export function itemCostIssue(item: CostableItem): string | null {
+  if (itemCost(item) != null) return null;
+  if (!item.ingredient) return "Falta el ingrediente.";
+  if (unitDimension(item.unit) !== unitDimension(item.ingredient.base_unit)) {
+    return `La unidad de la receta (${item.unit}) no coincide con la del ingrediente (${item.ingredient.base_unit}).`;
+  }
+  return ingredientPriceIssue(item.ingredient);
 }
 
 export type RecipeCost = {
@@ -91,15 +146,19 @@ export type RecipeCost = {
   missing: number;
 };
 
-/** Costo total y por unidad de una receta. */
+/**
+ * Costo total y por unidad de una receta. Única implementación de esta suma:
+ * la usan tanto la receta guardada como el editor mientras se edita, para que
+ * el número que se ve editando sea exactamente el que queda guardado.
+ */
 export function recipeCost(
-  items: RecipeItemWithIngredient[],
+  items: CostableItem[],
   yieldUnits: number,
 ): RecipeCost {
   let total = 0;
   let missing = 0;
   for (const item of items) {
-    const c = recipeItemCost(item);
+    const c = itemCost(item);
     if (c == null) missing++;
     else total += c;
   }

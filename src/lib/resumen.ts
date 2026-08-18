@@ -1,4 +1,4 @@
-import type { MateriaPrimaResult } from "@/lib/materia-prima";
+import type { MateriaPrimaResult, IvaBreakdown } from "@/lib/materia-prima";
 import type { BarraResult } from "@/lib/barra";
 import type { EventRow, EventCost, EventCostSection } from "@/lib/types";
 
@@ -20,6 +20,11 @@ export type EventSummary = {
   additionalTotal: number;
   /** Estimado total a cobrar al cliente = precio×PAX + adicionales. */
   totalToClient: number;
+  /**
+   * Qué parte de la materia prima está comprada con precios c/IVA y qué parte
+   * sin IVA. Informativo para la contabilidad: no afecta ningún total.
+   */
+  materiaPrimaIva: IvaBreakdown;
 };
 
 function sumSection(costs: EventCost[], section: EventCostSection): number {
@@ -73,5 +78,6 @@ export function computeEventSummary(
     pricePerPerson,
     additionalTotal,
     totalToClient,
+    materiaPrimaIva: mp.ivaBreakdown,
   };
 }

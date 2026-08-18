@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,9 +60,17 @@ export function TablewareItemDialog({
   const update = useUpdateTablewareItem();
   const [form, setForm] = useState<Form>(blank);
 
-  useEffect(() => {
+  // Cargar el formulario al abrir. Se hace durante el render (no en un effect)
+  // para que el diálogo ya aparezca con los datos correctos en el primer
+  // pintado, sin el parpadeo del contenido anterior. `item` es un snapshot que
+  // el padre congela al hacer clic en Editar, así que no cambia mientras está
+  // abierto: mirar solo la transición de `open` es equivalente y además evita
+  // pisar lo que el usuario esté tipeando.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) setForm(item ? fromItem(item) : blank());
-  }, [open, item]);
+  }
 
   async function handleSave() {
     if (!form.name.trim()) {

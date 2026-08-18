@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import {
   Trash2,
   Upload,
   ArrowLeft,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,7 +27,14 @@ import { ProductDialog } from "@/components/proveedores/product-dialog";
 import { ExcelImportDialog } from "@/components/proveedores/excel-import-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useProviders, useProducts, useDeleteProduct } from "@/lib/hooks";
-import { formatARS, formatDate, formatNum, pricePerBaseUnit, unitLabel } from "@/lib/format";
+import {
+  formatARS,
+  formatDate,
+  formatNum,
+  formatUnitContent,
+  pricePerBaseUnit,
+  unitLabel,
+} from "@/lib/format";
 import type { Product } from "@/lib/types";
 
 export default function ProviderProductsPage() {
@@ -40,6 +48,15 @@ export default function ProviderProductsPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [toDelete, setToDelete] = useState<Product | null>(null);
+
+  // Aviso suave: dentro de un mismo proveedor lo normal es que todos los
+  // precios estén sobre la misma base. Si están mezclados, probablemente se
+  // eligió mal la columna de precio en alguna importación.
+  const mixedIva = useMemo(() => {
+    if (!products || products.length < 2) return false;
+    const first = products[0].price_includes_iva;
+    return products.some((p) => p.price_includes_iva !== first);
+  }, [products]);
 
   function openNew() {
     setEditing(null);
@@ -93,6 +110,19 @@ export default function ProviderProductsPage() {
         </div>
       </div>
 
+      {mixedIva && (
+        <Card className="mb-4 border-sky-200 bg-sky-50 p-4 text-sm dark:bg-sky-950/20">
+          <div className="flex items-start gap-2 text-sky-700 dark:text-sky-400">
+            <Info className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Este proveedor tiene productos cargados con y sin IVA. Verificá que
+              sea correcto: suele pasar cuando una importación tomó la columna de
+              precio equivocada. Los precios se usan tal cual están cargados.
+            </span>
+          </div>
+        </Card>
+      )}
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : !products || products.length === 0 ? (
@@ -106,7 +136,18 @@ export default function ProviderProductsPage() {
               <TableRow>
                 <TableHead>Producto</TableHead>
                 <TableHead>Unidad</TableHead>
-                <TableHead className="text-right">Pack</TableHead>
+                <TableHead className="text-right">
+                  Pack
+                  <span className="block text-[11px] font-normal text-muted-foreground">
+                    cuánto trae la compra
+                  </span>
+                </TableHead>
+                <TableHead className="text-right">
+                  Contenido
+                  <span className="block text-[11px] font-normal text-muted-foreground">
+                    dentro de cada unidad
+                  </span>
+                </TableHead>
                 <TableHead className="text-right">Precio</TableHead>
                 <TableHead className="text-right">$/unidad</TableHead>
                 <TableHead>Actualizado</TableHead>
@@ -131,6 +172,16 @@ export default function ProviderProductsPage() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatNum(p.pack_size)} {unitLabel(p.base_unit)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {/* Solo aplica a productos vendidos por unidad: es el volumen
+                        o peso que trae cada botella/paquete. En los productos que
+                        ya se venden por peso o volumen, ese dato es el Pack. */}
+                    {formatUnitContent(p.unit_content_value, p.unit_content_unit) ?? (
+                      <span className="text-muted-foreground">
+                        {p.base_unit === "un" ? "sin cargar" : "—"}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     {formatARS(p.price)}

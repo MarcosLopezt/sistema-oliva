@@ -19,7 +19,12 @@ import {
   useProviders,
   useLinkIngredientProduct,
 } from "@/lib/hooks";
-import { formatARS, pricePerBaseUnit, unitLabel } from "@/lib/format";
+import {
+  formatARS,
+  formatUnitContent,
+  pricePerBaseUnit,
+  unitLabel,
+} from "@/lib/format";
 import type { IngredientWithProduct } from "@/lib/types";
 
 export function ProductLinkDialog({
@@ -147,6 +152,11 @@ function LinkForm({
                       {providerName(p.provider_id)} ·{" "}
                       {formatARS(pricePerBaseUnit(p.price, p.pack_size))} /{" "}
                       {unitLabel(p.base_unit)}
+                      {/* El contenido por unidad es el dato que decide si el
+                          producto sirve para este ingrediente (ej: "5 L c/u"). */}
+                      {formatUnitContent(p.unit_content_value, p.unit_content_unit) && (
+                        <> · {formatUnitContent(p.unit_content_value, p.unit_content_unit)} c/u</>
+                      )}
                     </div>
                   </div>
                   <Button

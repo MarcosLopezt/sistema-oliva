@@ -18,8 +18,9 @@ import { IngredientDialog } from "@/components/ingredientes/ingredient-dialog";
 import { ProductLinkDialog } from "@/components/ingredientes/product-link-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useIngredients, useDeleteIngredient } from "@/lib/hooks";
-import { formatARS, pricePerBaseUnit, unitLabel } from "@/lib/format";
-import { unitDimension, type IngredientWithProduct } from "@/lib/types";
+import { formatARS, unitLabel } from "@/lib/format";
+import { ingredientUnitPrice, ingredientPriceIssue } from "@/lib/cost";
+import type { IngredientWithProduct } from "@/lib/types";
 
 export default function IngredientesPage() {
   const { data: ingredients, isLoading } = useIngredients();
@@ -85,13 +86,11 @@ export default function IngredientesPage() {
             <TableBody>
               {ingredients.map((ing) => {
                 const prod = ing.product;
-                const dimMismatch =
-                  prod &&
-                  unitDimension(prod.base_unit) !==
-                    unitDimension(ing.base_unit);
-                const unitPrice = prod
-                  ? pricePerBaseUnit(prod.price, prod.pack_size)
-                  : ing.market_price;
+                // Mismo motor que usan recetas y eventos: contempla el modelo
+                // de tres capas y convierte a la unidad base del ingrediente.
+                const unitPrice = ingredientUnitPrice(ing);
+                // La alerta se enciende exactamente cuando el costeo falla.
+                const issue = ingredientPriceIssue(ing);
                 return (
                   <TableRow key={ing.id}>
                     <TableCell className="font-medium">{ing.name}</TableCell>
@@ -104,10 +103,10 @@ export default function IngredientesPage() {
                           <span className="truncate">
                             {prod.provider?.name}
                           </span>
-                          {dimMismatch && (
+                          {issue && (
                             <span
                               className="inline-flex items-center gap-1 text-xs text-amber-600"
-                              title="La unidad del producto no coincide con la del ingrediente"
+                              title={issue}
                             >
                               <TriangleAlert className="size-3.5" />
                               revisar unidad
@@ -122,8 +121,18 @@ export default function IngredientesPage() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      {formatARS(unitPrice)}
+                    <TableCell className="text-right tabular-nums">
+                      {unitPrice == null ? (
+                        "—"
+                      ) : (
+                        <>
+                          {formatARS(unitPrice)}
+                          <span className="text-muted-foreground">
+                            {" / "}
+                            {unitLabel(ing.base_unit)}
+                          </span>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">

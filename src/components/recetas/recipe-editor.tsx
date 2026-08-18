@@ -22,13 +22,17 @@ import {
   useUpdateRecipe,
   useSaveRecipeItems,
 } from "@/lib/hooks";
-import { ingredientUnitPrice, convert } from "@/lib/cost";
+import {
+  recipeCost,
+  itemCost,
+  itemCostIssue,
+  type CostableItem,
+} from "@/lib/cost";
 import { formatARS } from "@/lib/format";
 import {
   UNITS,
   RECIPE_CATEGORIES,
   BOCADO_SUBCATEGORIES,
-  unitDimension,
   type IngredientWithProduct,
   type RecipeCategory,
   type RecipeWithItems,
@@ -42,34 +46,17 @@ type Row = {
   unit: UnitKind;
 };
 
-function rowCost(row: Row): number | null {
-  const up = ingredientUnitPrice(row.ingredient);
-  if (up == null) return null;
-  const q = convert(
-    Number(row.quantity.replace(",", ".")) || 0,
-    row.unit,
-    row.ingredient.base_unit,
-  );
-  if (q == null) return null;
-  return up * q;
-}
-
-/** Texto explicativo para cuando el costo del ítem es null. */
-function costUnavailableReason(row: Row): string {
-  const ing = row.ingredient;
-  if (unitDimension(row.unit) !== unitDimension(ing.base_unit)) {
-    return "La unidad de la receta no coincide con la del ingrediente";
-  }
-  if (!ing.product && ing.market_price == null) {
-    return "Ingrediente sin precio — vinculá un producto o cargá precio de mercado";
-  }
-  if (ing.product) {
-    const { base_unit, unit_content_value } = ing.product;
-    if (base_unit === "un" && !unit_content_value) {
-      return "El producto está en unidades — configurá su contenido por unidad (ml o g) en la ficha del producto";
-    }
-  }
-  return "Ingrediente sin precio";
+/**
+ * Fila en edición → forma costeable. El editor guarda la cantidad como texto
+ * (el usuario está tipeando); acá se normaliza a número una sola vez y el
+ * cálculo lo hace cost.ts, igual que la receta ya guardada.
+ */
+function toCostable(row: Row): CostableItem {
+  return {
+    quantity: Number(row.quantity.replace(",", ".")) || 0,
+    unit: row.unit,
+    ingredient: row.ingredient,
+  };
 }
 
 export function RecipeEditor({ recipeId }: { recipeId?: string }) {
@@ -144,14 +131,7 @@ function EditorForm({ recipe }: { recipe: RecipeWithItems | null }) {
   }
 
   const yieldN = Number(yieldUnits.replace(",", ".")) || 0;
-  let total = 0;
-  let missing = 0;
-  for (const row of rows) {
-    const c = rowCost(row);
-    if (c == null) missing++;
-    else total += c;
-  }
-  const perUnit = yieldN > 0 ? total / yieldN : 0;
+  const { total, perUnit, missing } = recipeCost(rows.map(toCostable), yieldN);
 
   async function handleSave() {
     if (!name.trim()) {
@@ -295,7 +275,9 @@ function EditorForm({ recipe }: { recipe: RecipeWithItems | null }) {
             <div>
               <h2 className="font-medium">Ingredientes del lote</h2>
               <p className="text-sm text-muted-foreground">
-                Cantidades para producir {yieldN || 0} unidades.
+                Las cantidades son para UN LOTE COMPLETO, no por porción. El
+                rinde define cuántas porciones salen de ese lote: hoy, este lote
+                rinde {yieldN || 0} porciones.
               </p>
             </div>
             <div className="flex gap-2">
@@ -324,8 +306,17 @@ function EditorForm({ recipe }: { recipe: RecipeWithItems | null }) {
             </p>
           ) : (
             <div className="flex flex-col divide-y">
+              {/* Encabezado: la etiqueta "por lote" es lo que evita leer estos
+                  números como si fueran por plato. */}
+              <div className="flex flex-wrap items-center gap-2 pb-2 text-xs font-medium text-muted-foreground">
+                <span className="min-w-0 flex-1">Ingrediente</span>
+                <span className="w-50 text-center">Cantidad por lote</span>
+                <span className="w-28 text-right">Costo del lote</span>
+                <span className="w-8" />
+              </div>
               {rows.map((row) => {
-                const c = rowCost(row);
+                const costable = toCostable(row);
+                const c = itemCost(costable);
                 return (
                   <div
                     key={row.key}
@@ -359,12 +350,21 @@ function EditorForm({ recipe }: { recipe: RecipeWithItems | null }) {
                       {c == null ? (
                         <span
                           className="text-amber-600"
-                          title={costUnavailableReason(row)}
+                          title={itemCostIssue(costable) ?? undefined}
                         >
                           sin costo
                         </span>
                       ) : (
-                        formatARS(c)
+                        <>
+                          {formatARS(c)}
+                          {/* Equivalente por porción: es el número que la gente
+                              cree estar leyendo cuando mira el costo del lote. */}
+                          {yieldN > 1 && (
+                            <span className="block text-xs text-muted-foreground">
+                              {formatARS(c / yieldN)}/porción
+                            </span>
+                          )}
+                        </>
                       )}
                     </span>
                     <Button
