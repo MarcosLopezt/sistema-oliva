@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/format";
 import type { IngredientWithProduct, BarBeverage } from "@/lib/types";
 
 /**
@@ -55,9 +56,8 @@ function buildLabel(
   m: PriceMeta & { hasPrice: boolean },
   failed: boolean,
 ): MarketPriceLabel | null {
-  const date = m.market_price_updated_at
-    ? new Date(m.market_price_updated_at).toLocaleDateString("es-AR")
-    : "—";
+  // Vía formatDate para que el formato sea el mismo en toda la app (dd/mm/aaaa).
+  const date = formatDate(m.market_price_updated_at);
 
   if (m.market_price_source === "manual") {
     return { text: `Precio manual · Editado ${date}`, tone: "manual" };

@@ -34,7 +34,6 @@ import type {
   TablewareItem,
   TablewareItemWithProvider,
   TablewareItemInput,
-  EventTableware,
   EventTablewareWithItem,
   EventTablewareInput,
 } from "@/lib/types";

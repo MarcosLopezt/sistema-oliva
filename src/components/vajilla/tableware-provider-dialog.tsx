@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,9 +42,13 @@ export function TablewareProviderDialog({
   const update = useUpdateTablewareProvider();
   const [form, setForm] = useState<Form>(blank);
 
-  useEffect(() => {
+  // Ídem TablewareItemDialog: la carga se ajusta durante el render, no en un
+  // effect. `provider` es un snapshot congelado por el padre al abrir.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) setForm(provider ? fromProvider(provider) : blank());
-  }, [open, provider]);
+  }
 
   async function handleSave() {
     if (!form.name.trim()) {

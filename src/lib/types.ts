@@ -10,6 +10,13 @@ export const UNITS: { value: UnitKind; label: string }[] = [
   { value: "un", label: "un (unidades)" },
 ];
 
+/**
+ * Unidades válidas como "contenido por unidad" de un producto: peso o volumen,
+ * nunca conteo. Un contenido en 'un' sería redundante con pack_size y deja al
+ * producto imposible de costear. Lo refuerza la constraint de la migración 0016.
+ */
+export type ContentUnit = "g" | "kg" | "ml" | "l";
+
 /** Dimensión física de una unidad (para validar conversiones). */
 export function unitDimension(u: UnitKind): "mass" | "volume" | "count" {
   if (u === "g" || u === "kg") return "mass";
@@ -34,10 +41,22 @@ export type Product = {
   base_unit: UnitKind;
   /** Cantidad de base_unit por unidad de compra (ej: bidón 5 L → 5). */
   pack_size: number;
-  /** Precio de la unidad de compra (el "pack"). */
+  /**
+   * SEMÁNTICA DEL PRECIO — lo que Oliva efectivamente paga por la unidad de
+   * compra (el "pack"), tal cual salió de la columna elegida al importar el
+   * Excel del proveedor. Algunos proveedores facturan con IVA y otros no; el
+   * usuario elige la columna que corresponde a cada uno, así que este valor YA
+   * es el costo real. Todo el costeo (cost.ts, materia-prima.ts) lo usa tal
+   * cual: nunca se le suma ni se le resta IVA.
+   */
   price: number;
   /** Nombre de la unidad de venta del proveedor (ej: "cabeza", "bolsa", "docena"). Solo display. */
   sale_unit: string | null;
+  /**
+   * Indica si `price` ya trae el IVA incorporado. Es INFORMATIVO: sirve para
+   * trazabilidad (saber sobre qué base está cargada cada lista) y para el
+   * desglose contable del evento. NO se usa para recalcular precios.
+   */
   price_includes_iva: boolean;
   /**
    * Volumen o peso que contiene cada unidad individual cuando base_unit='un'.
@@ -47,7 +66,7 @@ export type Product = {
    */
   unit_content_value: number | null;
   /** Unidad del contenido por unidad. Solo aplica cuando unit_content_value != null. */
-  unit_content_unit: UnitKind | null;
+  unit_content_unit: ContentUnit | null;
   updated_at: string;
   created_at: string;
 };
@@ -93,7 +112,7 @@ export type ProductInput = {
   sale_unit?: string | null;
   price_includes_iva?: boolean;
   unit_content_value?: number | null;
-  unit_content_unit?: UnitKind | null;
+  unit_content_unit?: ContentUnit | null;
 };
 
 export type IngredientInput = {

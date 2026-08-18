@@ -15,7 +15,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCreateProduct, useUpdateProduct } from "@/lib/hooks";
-import { UNITS, type Product, type UnitKind } from "@/lib/types";
+import {
+  UNITS,
+  type ContentUnit,
+  type Product,
+  type UnitKind,
+} from "@/lib/types";
 import { parseUnitContentFromName } from "@/lib/unit-content-parser";
 
 export function ProductDialog({
@@ -68,7 +73,7 @@ function ProductForm({
   // Contenido por unidad: inicializar desde DB o auto-detectar del nombre.
   function initContent(): {
     value: string;
-    unit: UnitKind | "";
+    unit: ContentUnit | "";
     source: "name" | "manual" | "";
   } {
     if (product?.unit_content_value != null) {
@@ -87,7 +92,9 @@ function ProductForm({
 
   const init = initContent();
   const [unitContentValue, setUnitContentValue] = useState(init.value);
-  const [unitContentUnit, setUnitContentUnit] = useState<UnitKind | "">(init.unit);
+  const [unitContentUnit, setUnitContentUnit] = useState<ContentUnit | "">(
+    init.unit,
+  );
   // "name" = auto-detectado del nombre | "manual" = editado por el usuario | "" = vacío.
   const [contentSource, setContentSource] = useState<"name" | "manual" | "">(
     init.source,
@@ -117,7 +124,7 @@ function ProductForm({
     setContentSource("manual");
   }
 
-  function handleContentUnitChange(u: UnitKind | "") {
+  function handleContentUnitChange(u: ContentUnit | "") {
     setUnitContentUnit(u);
     setContentSource("manual");
   }
@@ -271,8 +278,9 @@ function ProductForm({
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Para productos en "unidades" que contienen volumen o peso (ej: botella
-            de 700 ml). Habilita calcular costos proporcionales en recetas.
+            Para productos en &quot;unidades&quot; que contienen volumen o peso
+            (ej: botella de 700 ml). Habilita calcular costos proporcionales en
+            recetas.
           </p>
           <div className="flex gap-2">
             <Input
@@ -285,7 +293,7 @@ function ProductForm({
             <NativeSelect
               value={unitContentUnit}
               onChange={(e) =>
-                handleContentUnitChange(e.target.value as UnitKind | "")
+                handleContentUnitChange(e.target.value as ContentUnit | "")
               }
               className="flex-1"
             >

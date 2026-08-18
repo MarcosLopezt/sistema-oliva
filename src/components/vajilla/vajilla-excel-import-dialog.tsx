@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/native-select";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -162,7 +161,6 @@ export function VajillaExcelImportDialog({
       });
     }
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, headerRow, ni, pi, defaultCostType, defaultCategory, overrides]);
 
   function setRowOverride(
@@ -214,8 +212,9 @@ export function VajillaExcelImportDialog({
         <DialogHeader>
           <DialogTitle>Importar catálogo de vajilla (Excel)</DialogTitle>
           <DialogDescription>
-            Subí el .xlsx del proveedor. Detectamos las columnas "ITEM" y "PRECIO UN"
-            automáticamente. Revisá el tipo (Alquiler / Compra) antes de importar.
+            Subí el .xlsx del proveedor. Detectamos las columnas &quot;ITEM&quot;
+            y &quot;PRECIO UN&quot; automáticamente. Revisá el tipo (Alquiler /
+            Compra) antes de importar.
           </DialogDescription>
         </DialogHeader>
 

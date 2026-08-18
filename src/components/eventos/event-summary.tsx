@@ -79,6 +79,34 @@ export function EventSummary({ event }: { event: EventRow }) {
           ))}
         </div>
 
+        {(summary.materiaPrimaIva.withIva > 0 ||
+          summary.materiaPrimaIva.withoutIva > 0) && (
+          <div className="border-t pt-3 text-sm">
+            <div className="mb-1 text-muted-foreground">
+              Materia prima según base de IVA{" "}
+              <span className="text-xs">
+                (informativo — no cambia el total)
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <IvaRow
+                label="Con IVA incluido"
+                value={summary.materiaPrimaIva.withIva}
+              />
+              <IvaRow
+                label="Sin IVA"
+                value={summary.materiaPrimaIva.withoutIva}
+              />
+              {summary.materiaPrimaIva.unknown > 0 && (
+                <IvaRow
+                  label="Sin dato (precio de mercado)"
+                  value={summary.materiaPrimaIva.unknown}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
         {summary.additionalTotal > 0 && (
           <div className="border-t pt-3 text-sm">
             <div className="flex items-center justify-between text-muted-foreground">
@@ -97,6 +125,15 @@ export function EventSummary({ event }: { event: EventRow }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function IvaRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between text-muted-foreground">
+      <span>{label}</span>
+      <span className="tabular-nums">{formatARS(value)}</span>
+    </div>
   );
 }
 

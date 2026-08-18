@@ -19,6 +19,7 @@ import {
   isSurplusSignificant,
   type MPGroup,
   type MPLine,
+  type IvaBreakdown,
 } from "@/lib/materia-prima";
 import { useMarketPriceUpdater } from "@/lib/hooks";
 import { isAutoMarket, marketPriceLabel } from "@/lib/market-price";
@@ -95,6 +96,7 @@ export function MateriaPrimaSection({
               {formatARS(mp.perPerson)}
             </div>
           </div>
+          <IvaBreakdownNote breakdown={mp.ivaBreakdown} />
         </CardContent>
       </Card>
 
@@ -214,6 +216,11 @@ export function MateriaPrimaSection({
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {formatARS(l.priceEach)}
+                      {l.priceIncludesIva != null && (
+                        <span className="mt-0.5 block text-xs">
+                          {l.priceIncludesIva ? "c/IVA" : "s/IVA"}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatARS(l.subtotal)}
@@ -237,6 +244,27 @@ export function MateriaPrimaSection({
             : ""
         }
       />
+    </div>
+  );
+}
+
+/**
+ * Desglose informativo del gasto según la base de IVA de cada producto.
+ * No cambia el total: solo indica qué parte del costo ya tiene IVA incluido.
+ */
+function IvaBreakdownNote({ breakdown }: { breakdown: IvaBreakdown }) {
+  const parts: string[] = [];
+  if (breakdown.withIva > 0) parts.push(`c/IVA ${formatARS(breakdown.withIva)}`);
+  if (breakdown.withoutIva > 0)
+    parts.push(`sin IVA ${formatARS(breakdown.withoutIva)}`);
+  if (breakdown.unknown > 0)
+    parts.push(`sin dato ${formatARS(breakdown.unknown)}`);
+  if (parts.length === 0) return null;
+
+  return (
+    <div className="text-sm text-muted-foreground">
+      Base de IVA
+      <div className="text-xs">{parts.join(" · ")}</div>
     </div>
   );
 }
