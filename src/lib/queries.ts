@@ -36,6 +36,9 @@ import type {
   TablewareItemInput,
   EventTablewareWithItem,
   EventTablewareInput,
+  Leftover,
+  LeftoverInput,
+  LeftoverWithProduct,
 } from "@/lib/types";
 
 const db = () => createClient();
@@ -915,6 +918,75 @@ export function computeVajillaTotal(items: EventTablewareWithItem[]): number {
     // compra: solo se carga si el usuario lo habilitó para este evento
     return sum + (e.charge_purchase ? e.quantity * e.item.unit_price : 0);
   }, 0);
+}
+
+// ---------------------------- Sobrantes ----------------------------
+// ETAPA 1: registro informativo. Ninguna de estas funciones toca el costeo.
+
+const LEFTOVER_SELECT =
+  "*, product:products(id, name, base_unit, pack_size, sale_unit, " +
+  "unit_content_value, unit_content_unit, leftover_shelf_life_days, " +
+  "provider:providers(id, name))";
+
+export async function listLeftovers(): Promise<LeftoverWithProduct[]> {
+  const { data, error } = await db()
+    .from("leftovers")
+    .select(LEFTOVER_SELECT)
+    // Sin vencimiento al final: son los que no se pueden priorizar.
+    .order("expires_at", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data as unknown as LeftoverWithProduct[]) ?? [];
+}
+
+/** Sobrantes de un evento (los que se registraron al cerrarlo). */
+export async function listEventLeftovers(
+  eventId: string,
+): Promise<LeftoverWithProduct[]> {
+  const { data, error } = await db()
+    .from("leftovers")
+    .select(LEFTOVER_SELECT)
+    .eq("origin_event_id", eventId)
+    .order("created_at");
+  if (error) throw new Error(error.message);
+  return (data as unknown as LeftoverWithProduct[]) ?? [];
+}
+
+export async function createLeftover(input: LeftoverInput): Promise<Leftover> {
+  const { data, error } = await db()
+    .from("leftovers")
+    .insert(input)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+/** Alta masiva: la confirmación del paso de cierre de evento. */
+export async function createLeftovers(rows: LeftoverInput[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const { error, count } = await db()
+    .from("leftovers")
+    .insert(rows, { count: "exact" });
+  if (error) throw new Error(error.message);
+  return count ?? rows.length;
+}
+
+export async function updateLeftover(
+  id: string,
+  input: Partial<LeftoverInput>,
+): Promise<Leftover> {
+  const { data, error } = await db()
+    .from("leftovers")
+    .update(input)
+    .eq("id", id)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+export async function deleteLeftover(id: string): Promise<void> {
+  const { error } = await db().from("leftovers").delete().eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 /** Genera el mensaje de pedido de vajilla para el proveedor. */

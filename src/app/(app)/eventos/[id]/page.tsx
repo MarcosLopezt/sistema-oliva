@@ -26,6 +26,7 @@ import { EventStaffSection } from "@/components/eventos/event-staff-section";
 import { EventVajillaSection } from "@/components/eventos/event-vajilla-section";
 import { EventVajillaParams } from "@/components/eventos/event-vajilla-params";
 import { EventSummary } from "@/components/eventos/event-summary";
+import { LeftoverCloseDialog } from "@/components/eventos/leftover-close-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   useEvent,
@@ -49,6 +50,7 @@ export default function EventoDetailPage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [leftoverOpen, setLeftoverOpen] = useState(false);
 
   if (isLoading)
     return <p className="text-sm text-muted-foreground">Cargando evento…</p>;
@@ -65,6 +67,9 @@ export default function EventoDetailPage() {
         input: { status: isActive ? "finalizado" : "activo" },
       });
       toast.success(isActive ? "Evento finalizado." : "Evento reactivado.");
+      // El evento ya quedó cerrado. Recién ahí se ofrece registrar los
+      // sobrantes: es un paso opcional que se puede saltear sin consecuencias.
+      if (isActive) setLeftoverOpen(true);
     } catch (e) {
       toast.error("No se pudo cambiar el estado", {
         description: e instanceof Error ? e.message : undefined,
@@ -194,6 +199,12 @@ export default function EventoDetailPage() {
       </div>
 
       <EventDialog open={editOpen} onOpenChange={setEditOpen} event={event} />
+      <LeftoverCloseDialog
+        open={leftoverOpen}
+        onOpenChange={setLeftoverOpen}
+        event={event}
+        selections={selections ?? []}
+      />
       <ConfirmDialog
         open={confirmDel}
         onOpenChange={setConfirmDel}

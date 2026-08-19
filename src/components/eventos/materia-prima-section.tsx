@@ -21,13 +21,19 @@ import {
   type MPLine,
   type IvaBreakdown,
 } from "@/lib/materia-prima";
-import { useMarketPriceUpdater } from "@/lib/hooks";
+import { useMarketPriceUpdater, useLeftovers } from "@/lib/hooks";
 import { isAutoMarket, marketPriceLabel } from "@/lib/market-price";
-import { formatARS, formatNum } from "@/lib/format";
+import { formatARS, formatDate, formatNum } from "@/lib/format";
+import {
+  formatQty,
+  productsByIngredient,
+  usableByProduct,
+} from "@/lib/sobrantes";
 import type {
   EventRow,
   EventRecipeWithRecipe,
   IngredientWithProduct,
+  LeftoverWithProduct,
 } from "@/lib/types";
 
 export function MateriaPrimaSection({
@@ -60,6 +66,28 @@ export function MateriaPrimaSection({
   const failed = useMarketPriceUpdater(event.id, autoIngredients);
 
   const [orderGroup, setOrderGroup] = useState<MPGroup | null>(null);
+
+  // AVISO DE SOBRANTES — estrictamente informativo.
+  // El sistema NO descuenta estas cantidades: el costo del evento, el pedido al
+  // proveedor y el precio por persona salen igual que si no existieran. Es el
+  // usuario el que decide qué hacer con el dato.
+  const { data: leftovers } = useLeftovers();
+  const productByIngredient = useMemo(
+    () => productsByIngredient(selections),
+    [selections],
+  );
+  const leftoversByProduct = useMemo(
+    () => usableByProduct(leftovers ?? []),
+    [leftovers],
+  );
+  /** Sobrantes disponibles del producto que abastece esta línea. */
+  const leftoversForLine = (line: MPLine): LeftoverWithProduct[] => {
+    for (const id of line.ingredientIds) {
+      const prod = productByIngredient.get(id);
+      if (prod) return leftoversByProduct.get(prod.id) ?? [];
+    }
+    return [];
+  };
 
   // Líneas con sobrante significativo (solo modelo tres capas).
   const surplusLines = useMemo(
@@ -210,6 +238,7 @@ export function MateriaPrimaSection({
                           {label.text}
                         </span>
                       )}
+                      <LeftoverNote leftovers={leftoversForLine(l)} />
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       <BuyQtyCell line={l} />
@@ -245,6 +274,45 @@ export function MateriaPrimaSection({
         }
       />
     </div>
+  );
+}
+
+/**
+ * Aviso de que hay sobrante disponible de este producto en otro evento.
+ *
+ * SOLO INFORMATIVO. No descuenta la cantidad, no cambia el costo del evento, no
+ * altera el pedido al proveedor ni el precio sugerido por persona: el usuario
+ * decide por su cuenta si lo usa. Los sobrantes vencidos ni siquiera llegan acá
+ * (`usableByProduct` los filtra), así que nunca se ofrece algo que no sirve.
+ *
+ * Tono neutro a propósito: no es una alerta, es un dato.
+ */
+function LeftoverNote({ leftovers }: { leftovers: LeftoverWithProduct[] }) {
+  if (leftovers.length === 0) return null;
+
+  // El primero es el que vence antes (usableByProduct los ordena así).
+  const [first, ...rest] = leftovers;
+
+  return (
+    <span className="mt-1 flex items-start gap-1 text-xs text-sky-700 dark:text-sky-400">
+      <Info className="mt-0.5 size-3 shrink-0" />
+      <span>
+        Hay{" "}
+        <span className="font-medium">
+          {formatQty(first.qty_remaining, first)}
+        </span>{" "}
+        de este producto disponible
+        {first.origin_event_name && <> (sobrante de {first.origin_event_name}</>}
+        {first.origin_event_name && first.expires_at && (
+          <>, vence el {formatDate(first.expires_at)}</>
+        )}
+        {first.origin_event_name && <>)</>}
+        {!first.origin_event_name && first.expires_at && (
+          <> (vence el {formatDate(first.expires_at)})</>
+        )}
+        {rest.length > 0 && <> · y {rest.length} sobrante{rest.length > 1 ? "s" : ""} más</>}
+      </span>
+    </span>
   );
 }
 
