@@ -67,6 +67,12 @@ export type Product = {
   unit_content_value: number | null;
   /** Unidad del contenido por unidad. Solo aplica cuando unit_content_value != null. */
   unit_content_unit: ContentUnit | null;
+  /**
+   * Días que dura el sobrante de este producto una vez abierto/fraccionado
+   * (ej: aceite 180, crema 5, verduras 3). null = sin definir: los sobrantes
+   * quedan sin fecha de vencimiento y la UI avisa que falta configurarlo.
+   */
+  leftover_shelf_life_days: number | null;
   updated_at: string;
   created_at: string;
 };
@@ -113,6 +119,7 @@ export type ProductInput = {
   price_includes_iva?: boolean;
   unit_content_value?: number | null;
   unit_content_unit?: ContentUnit | null;
+  leftover_shelf_life_days?: number | null;
 };
 
 export type IngredientInput = {
@@ -596,4 +603,108 @@ export type EventTablewareInput = {
   multiplier?: number;
   margin_override?: number | null;
   quantity_manual?: boolean;
+};
+
+// ----------------------------- Sobrantes -------------------------------
+// ETAPA 1: registro informativo. Nada de esto entra en el motor de costeo:
+// no descuenta stock, no altera costos de eventos ni el precio por persona.
+
+/**
+ * Estado del sobrante.
+ *
+ * 'vencido' NO se persiste: la fuente de verdad es `expires_at` y el estado
+ * se deriva al leer (ver `effectiveStatus` en lib/sobrantes.ts). Así no hace
+ * falta cron y no queda drift si después se edita la fecha. El valor existe
+ * en el enum porque la Etapa 2 va a necesitar congelarlo.
+ */
+export type LeftoverStatus =
+  | "disponible"
+  | "vencido"
+  | "consumido"
+  | "descartado";
+
+export const LEFTOVER_STATUSES: { value: LeftoverStatus; label: string }[] = [
+  { value: "disponible", label: "Disponible" },
+  { value: "vencido", label: "Vencido" },
+  { value: "consumido", label: "Consumido" },
+  { value: "descartado", label: "Descartado" },
+];
+
+export type Leftover = {
+  id: string;
+  product_id: string;
+  /** Evento del que sobró. null = carga manual. */
+  origin_event_id: string | null;
+
+  // CANTIDADES — siempre en `base_unit`, nunca en porcentaje.
+  /** Lo que calculó el sistema al cerrar el evento. null si es carga manual. */
+  qty_calculated: number | null;
+  /**
+   * Lo que confirmó el usuario AL REGISTRAR. Queda congelada: es el par de
+   * `qty_calculated` para calibrar la merma (ver `calibrationByProduct`).
+   */
+  qty_confirmed: number;
+  /** Stock actual. Es la que se edita y se consume. */
+  qty_remaining: number;
+
+  // SNAPSHOTS al registrar (datos irrecuperables si cambia el producto).
+  base_unit: UnitKind;
+  unit_content_value: number | null;
+  unit_content_unit: ContentUnit | null;
+  /** Total comprado en el evento origen, en base_unit. Habilita el "% del pack". */
+  purchased_qty: number | null;
+  /** $ por base_unit al registrar. Sin uso en Etapa 1; lo necesita la Etapa 2. */
+  unit_cost: number | null;
+  /** Merma del evento con la que se calculó `qty_calculated`. */
+  merma_pct: number | null;
+  /** Nombre del evento origen al registrar (sobrevive si se borra el evento). */
+  origin_event_name: string | null;
+
+  status: LeftoverStatus;
+  registered_at: string;
+  /** Calculada: fecha del evento + vida útil. null = sin vida útil definida. */
+  expires_at: string | null;
+  /** true = el usuario la sobrescribió a mano; no recalcular. */
+  expiry_manual: boolean;
+
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Sobrante con producto y proveedor embebidos (join para el listado). */
+export type LeftoverWithProduct = Leftover & {
+  product:
+    | (Pick<
+        Product,
+        | "id"
+        | "name"
+        | "base_unit"
+        | "pack_size"
+        | "sale_unit"
+        | "unit_content_value"
+        | "unit_content_unit"
+        | "leftover_shelf_life_days"
+      > & { provider: Pick<Provider, "id" | "name"> | null })
+    | null;
+};
+
+export type LeftoverInput = {
+  product_id: string;
+  origin_event_id?: string | null;
+  qty_calculated?: number | null;
+  qty_confirmed: number;
+  qty_remaining: number;
+  base_unit: UnitKind;
+  unit_content_value?: number | null;
+  unit_content_unit?: ContentUnit | null;
+  purchased_qty?: number | null;
+  unit_cost?: number | null;
+  merma_pct?: number | null;
+  origin_event_name?: string | null;
+  status?: LeftoverStatus;
+  registered_at?: string;
+  expires_at?: string | null;
+  expiry_manual?: boolean;
+  note?: string | null;
 };

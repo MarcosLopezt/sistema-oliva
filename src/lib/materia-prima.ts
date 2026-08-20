@@ -101,6 +101,25 @@ export type MPLine = {
    * Ej: comprar 1 caja (6 un) pero necesitar 2 → surplusUnits = 4.
    */
   surplusUnits: number | null;
+  /**
+   * Cantidad realmente necesaria —con merma y ya consolidada por producto—
+   * expresada en la misma unidad que `totalBaseQty`, SIN redondear a packs.
+   * Es el número que el motor calcula justo antes del `ceil`.
+   *
+   * DATO DE SALIDA: no participa de ningún cálculo de costo. Se expone para la
+   * sección Sobrantes, que necesita saber cuánto se pagó de más.
+   *
+   * NO CONFUNDIR CON `surplusUnits` — son dos cosas distintas:
+   *  · `surplusUnits` = unidades ENTERAS SIN ABRIR que sobran al comprar packs
+   *    completos (packs × pack_size − unitsNeeded). Solo en modelo tres capas.
+   *  · `totalBaseQty − neededBaseQty` = SOBRANTE REAL, que además incluye el
+   *    contenido que queda dentro de la unidad ya abierta.
+   *
+   * Ejemplo del aceite (botella de 5 L): se necesitan 1,38 botellas → se
+   * compran 2 → `surplusUnits` = 0 (ninguna botella quedó cerrada), pero el
+   * sobrante real es 2 − 1,38 = 0,62 botellas = 3,1 L pagados sin usar.
+   */
+  neededBaseQty: number;
 };
 
 export type MPGroup = {
@@ -345,6 +364,9 @@ export function computeMateriaPrima(
       priceIncludesIva: prod.price_includes_iva,
       saleUnit: prod.sale_unit ?? null,
       priceEach: prod.price,
+      // Necesidad sin redondear, tal como quedó consolidada. Solo se expone
+      // (ver MPLine.neededBaseQty); ningún cálculo de abajo la usa.
+      neededBaseQty: need.productQty,
     };
 
     if (need.threeLayer) {
@@ -411,6 +433,9 @@ export function computeMateriaPrima(
         unitsNeeded: null,
         unitsPerPack: null,
         surplusUnits: null,
+        // Sin redondeo a packs: se compra exactamente lo necesario, así que no
+        // hay sobrante sistemático en las líneas de precio de mercado.
+        neededBaseQty: baseQty,
       },
     );
   }

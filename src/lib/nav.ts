@@ -6,6 +6,7 @@ import {
   Users,
   Settings,
   UtensilsCrossed,
+  Archive,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/recetas", label: "Recetas", icon: BookOpen },
   { href: "/proveedores", label: "Proveedores", icon: Truck },
   { href: "/vajilla", label: "Vajilla", icon: UtensilsCrossed },
+  { href: "/sobrantes", label: "Sobrantes", icon: Archive },
   { href: "/personal", label: "Personal", icon: Users },
   { href: "/ingredientes", label: "Ingredientes", icon: Carrot },
   { href: "/configuracion", label: "Configuración", icon: Settings },

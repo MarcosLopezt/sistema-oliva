@@ -35,6 +35,7 @@ import type {
   TablewareProviderInput,
   TablewareItemInput,
   EventTablewareInput,
+  LeftoverInput,
 } from "@/lib/types";
 
 export const keys = {
@@ -61,6 +62,8 @@ export const keys = {
       : (["tableware_items"] as const),
   allTablewareItems: ["tableware_items"] as const,
   eventTableware: (id: string) => ["events", id, "tableware"] as const,
+  leftovers: ["leftovers"] as const,
+  eventLeftovers: (id: string) => ["events", id, "leftovers"] as const,
 };
 
 // ----------------------------- Proveedores -----------------------------
@@ -696,6 +699,70 @@ export function useRecalcNonManualTableware() {
     }) => q.recalcNonManualTableware(eventId, pax, globalMargin),
     onSuccess: (_d, vars) =>
       qc.invalidateQueries({ queryKey: keys.eventTableware(vars.eventId) }),
+  });
+}
+
+// ---------------------------- Sobrantes ----------------------------
+
+export function useLeftovers() {
+  return useQuery({ queryKey: keys.leftovers, queryFn: q.listLeftovers });
+}
+
+export function useEventLeftovers(eventId: string | undefined) {
+  return useQuery({
+    queryKey: keys.eventLeftovers(eventId ?? ""),
+    queryFn: () => q.listEventLeftovers(eventId!),
+    enabled: !!eventId,
+  });
+}
+
+/** Invalida el listado global y, si el sobrante vino de un evento, el del evento. */
+function invalidateLeftovers(
+  qc: ReturnType<typeof useQueryClient>,
+  eventId?: string | null,
+) {
+  qc.invalidateQueries({ queryKey: keys.leftovers });
+  if (eventId) qc.invalidateQueries({ queryKey: keys.eventLeftovers(eventId) });
+}
+
+export function useCreateLeftover() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LeftoverInput) => q.createLeftover(input),
+    onSuccess: (_d, input) => invalidateLeftovers(qc, input.origin_event_id),
+  });
+}
+
+export function useCreateLeftovers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rows }: { rows: LeftoverInput[]; eventId?: string }) =>
+      q.createLeftovers(rows),
+    onSuccess: (_d, vars) => invalidateLeftovers(qc, vars.eventId),
+  });
+}
+
+export function useUpdateLeftover() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      eventId?: string | null;
+      input: Partial<LeftoverInput>;
+    }) => q.updateLeftover(id, input),
+    onSuccess: (_d, vars) => invalidateLeftovers(qc, vars.eventId),
+  });
+}
+
+export function useDeleteLeftover() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string; eventId?: string | null }) =>
+      q.deleteLeftover(id),
+    onSuccess: (_d, vars) => invalidateLeftovers(qc, vars.eventId),
   });
 }
 

@@ -69,6 +69,11 @@ function ProductForm({
   const [packSize, setPackSize] = useState(String(product?.pack_size ?? 1));
   const [price, setPrice] = useState(String(product?.price ?? 0));
   const [iva, setIva] = useState(product?.price_includes_iva ?? false);
+  const [shelfLife, setShelfLife] = useState(
+    product?.leftover_shelf_life_days != null
+      ? String(product.leftover_shelf_life_days)
+      : "",
+  );
 
   // Contenido por unidad: inicializar desde DB o auto-detectar del nombre.
   function initContent(): {
@@ -152,6 +157,14 @@ function ProductForm({
     const ucu = unitContentUnit || null;
     const validContent = ucv && ucv > 0 && ucu ? { ucv, ucu } : null;
 
+    // Vida útil del sobrante: opcional. Vacío = sin definir (los sobrantes de
+    // este producto quedan sin fecha de vencimiento).
+    const shelf = shelfLife.trim() ? Number(shelfLife.replace(",", ".")) : null;
+    if (shelf != null && (!Number.isFinite(shelf) || shelf <= 0)) {
+      toast.error("Los días de vida útil deben ser un número mayor a 0.");
+      return;
+    }
+
     const input = {
       provider_id: providerId,
       name: name.trim(),
@@ -163,6 +176,7 @@ function ProductForm({
       price_includes_iva: iva,
       unit_content_value: validContent?.ucv ?? null,
       unit_content_unit: validContent?.ucu ?? null,
+      leftover_shelf_life_days: shelf != null ? Math.round(shelf) : null,
     };
     try {
       if (isEdit) {
@@ -304,6 +318,26 @@ function ProductForm({
               <option value="kg">kg (kilos)</option>
             </NativeSelect>
           </div>
+        </div>
+
+        {/* Vida útil del sobrante — alimenta la fecha de vencimiento en Sobrantes */}
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+          <Label htmlFor="prod-shelf-life">
+            Días de vida útil del sobrante (opcional)
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Cuánto dura lo que sobra de este producto una vez abierto. Ej: aceite
+            180 · crema 5 · verduras 3. Si lo dejás vacío, los sobrantes se
+            registran sin fecha de vencimiento.
+          </p>
+          <Input
+            id="prod-shelf-life"
+            inputMode="numeric"
+            placeholder="Ej: 180"
+            value={shelfLife}
+            onChange={(e) => setShelfLife(e.target.value)}
+            className="w-32"
+          />
         </div>
       </div>
       <DialogFooter>
