@@ -15,9 +15,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { RateCell } from "@/components/personal/rate-origin";
 import { useStaffPayments, useUpdateEventStaff } from "@/lib/hooks";
 import { formatARS, formatNum, formatDate } from "@/lib/format";
-import { effectiveRate, staffLineTotal } from "@/lib/personal";
+import { resolveRate, staffLineTotal } from "@/lib/personal";
 import { staffCategoryLabel, type EventStaffWithEvent } from "@/lib/types";
 
 type StaffGroup = {
@@ -191,8 +192,8 @@ function StaffPaymentCard({ group }: { group: StaffGroup }) {
               <TableCell className="text-right tabular-nums">
                 {formatNum(es.hours)}
               </TableCell>
-              <TableCell className="text-right tabular-nums text-muted-foreground">
-                {formatARS(effectiveRate(es))}
+              <TableCell className="text-right text-muted-foreground">
+                <RateCell resolved={resolveRate(es)} />
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {formatARS(staffLineTotal(es))}

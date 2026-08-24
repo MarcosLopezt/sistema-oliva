@@ -26,6 +26,9 @@ import type {
   EventCostInput,
   Staff,
   StaffInput,
+  StaffWithRole,
+  StaffRole,
+  StaffRoleInput,
   EventStaffInput,
   EventStaffWithStaff,
   EventStaffWithEvent,
@@ -583,14 +586,49 @@ export async function deleteEventCost(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+// ---------------------------- Roles de personal ----------------------------
+
+export async function listStaffRoles(): Promise<StaffRole[]> {
+  const { data, error } = await db()
+    .from("staff_roles")
+    .select("*")
+    .order("name");
+  return check(data, error);
+}
+
+export async function createStaffRole(input: StaffRoleInput): Promise<StaffRole> {
+  const { data, error } = await db()
+    .from("staff_roles")
+    .insert(input)
+    .select()
+    .single();
+  return check(data, error);
+}
+
+export async function updateStaffRole(
+  id: string,
+  input: Partial<StaffRoleInput>,
+): Promise<StaffRole> {
+  const { data, error } = await db()
+    .from("staff_roles")
+    .update(input)
+    .eq("id", id)
+    .select()
+    .single();
+  return check(data, error);
+}
+
 // ------------------------------- Personal -------------------------------
 
-export async function listStaff(): Promise<Staff[]> {
+const STAFF_SELECT = "*, staff_role:staff_roles(*)";
+
+export async function listStaff(): Promise<StaffWithRole[]> {
   const { data, error } = await db()
     .from("staff")
-    .select("*")
+    .select(STAFF_SELECT)
     .order("full_name");
-  return check(data, error);
+  if (error) throw new Error(error.message);
+  return (data as unknown as StaffWithRole[]) ?? [];
 }
 
 export async function createStaff(input: StaffInput): Promise<Staff> {
@@ -617,7 +655,8 @@ export async function updateStaff(
 
 // --------------------- Personal asignado al evento ---------------------
 
-const EVENT_STAFF_SELECT = "*, staff:staff(*)";
+const EVENT_STAFF_SELECT =
+  "*, staff:staff(*, staff_role:staff_roles(*)), event_role:staff_roles(*)";
 
 export async function listEventStaff(
   eventId: string,
@@ -642,6 +681,20 @@ export async function addEventStaff(
   return check(data, error) as unknown as EventStaffWithStaff;
 }
 
+/** Alta de varios empleados de una: un solo insert para las N filas. */
+export async function addEventStaffBulk(
+  eventId: string,
+  inputs: EventStaffInput[],
+): Promise<EventStaffWithStaff[]> {
+  if (inputs.length === 0) return [];
+  const { data, error } = await db()
+    .from("event_staff")
+    .insert(inputs.map((i) => ({ ...i, event_id: eventId })))
+    .select(EVENT_STAFF_SELECT);
+  if (error) throw new Error(error.message);
+  return (data as unknown as EventStaffWithStaff[]) ?? [];
+}
+
 export async function updateEventStaff(
   id: string,
   input: Partial<EventStaffInput>,
@@ -655,11 +708,20 @@ export async function removeEventStaff(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Baja de varias asignaciones de una. */
+export async function removeEventStaffBulk(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await db().from("event_staff").delete().in("id", ids);
+  if (error) throw new Error(error.message);
+}
+
 /** Todas las participaciones en eventos (con empleado y evento) para la vista de Pagos. */
 export async function listStaffPayments(): Promise<EventStaffWithEvent[]> {
   const { data, error } = await db()
     .from("event_staff")
-    .select("*, staff:staff(*), event:events(id, name, event_date)");
+    .select(
+      "*, staff:staff(*, staff_role:staff_roles(*)), event_role:staff_roles(*), event:events(id, name, event_date)",
+    );
   if (error) throw new Error(error.message);
   return (data as unknown as EventStaffWithEvent[]) ?? [];
 }

@@ -463,12 +463,40 @@ export function staffCategoryLabel(value: string): string {
   return STAFF_CATEGORIES.find((c) => c.value === value)?.label ?? value;
 }
 
+/**
+ * Rol dentro de una categoría (Chef, Mozo, Bachero…). Su tarifa es el
+ * NIVEL 1 de la jerarquía: el valor por defecto que heredan los empleados
+ * que no tienen tarifa propia.
+ */
+export type StaffRole = {
+  id: string;
+  name: string;
+  category: StaffCategory;
+  hourly_rate: number;
+  active: boolean;
+  created_at: string;
+};
+
+export type StaffRoleInput = {
+  name: string;
+  category: StaffCategory;
+  hourly_rate: number;
+  active?: boolean;
+};
+
 export type Staff = {
   id: string;
   full_name: string;
   category: StaffCategory;
+  /**
+   * Texto libre previo a los roles. Se conserva como respaldo histórico de
+   * la migración 0018; la UI usa role_id. No mostrar en pantallas nuevas.
+   */
   role: string | null;
-  hourly_rate: number;
+  /** Rol habitual del empleado (null = sin rol asignado todavía). */
+  role_id: string | null;
+  /** NIVEL 2: tarifa propia. null = hereda la del rol. */
+  hourly_rate: number | null;
   active: boolean;
   created_at: string;
 };
@@ -476,9 +504,14 @@ export type Staff = {
 export type StaffInput = {
   full_name: string;
   category: StaffCategory;
-  role?: string | null;
-  hourly_rate: number;
+  role_id?: string | null;
+  hourly_rate: number | null;
   active?: boolean;
+};
+
+/** Empleado con su rol habitual embebido (join). */
+export type StaffWithRole = Staff & {
+  staff_role: StaffRole | null;
 };
 
 /** Empleado asignado a un evento (horas + tarifa puntual + estado de pago). */
@@ -487,8 +520,10 @@ export type EventStaff = {
   event_id: string;
   staff_id: string;
   hours: number;
-  /** Tarifa puntual para este evento (null = usar staff.hourly_rate). */
+  /** NIVEL 3: tarifa puntual para este evento (null = resolver por jerarquía). */
   rate_override: number | null;
+  /** Rol puntual para este evento (null = usar el rol habitual del empleado). */
+  role_id: string | null;
   paid: boolean;
   created_at: string;
 };
@@ -497,17 +532,21 @@ export type EventStaffInput = {
   staff_id: string;
   hours: number;
   rate_override?: number | null;
+  role_id?: string | null;
   paid?: boolean;
 };
 
-/** Asignación con el empleado embebido (join). */
+/** Asignación con el empleado y el rol del evento embebidos (join). */
 export type EventStaffWithStaff = EventStaff & {
-  staff: Staff | null;
+  staff: StaffWithRole | null;
+  /** Rol puntual del evento, ya resuelto (null = manda el habitual). */
+  event_role: StaffRole | null;
 };
 
 /** Asignación con el empleado y el evento embebidos (para la vista de Pagos). */
 export type EventStaffWithEvent = EventStaff & {
-  staff: Staff | null;
+  staff: StaffWithRole | null;
+  event_role: StaffRole | null;
   event: Pick<EventRow, "id" | "name" | "event_date"> | null;
 };
 

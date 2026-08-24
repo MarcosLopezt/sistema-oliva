@@ -31,6 +31,7 @@ import type {
   BarBeverageInput,
   EventCostInput,
   StaffInput,
+  StaffRoleInput,
   EventStaffInput,
   TablewareProviderInput,
   TablewareItemInput,
@@ -53,6 +54,7 @@ export const keys = {
   barBeverages: ["bar_beverages"] as const,
   eventCosts: (id: string) => ["events", id, "costs"] as const,
   staff: ["staff"] as const,
+  staffRoles: ["staff_roles"] as const,
   eventStaff: (id: string) => ["events", id, "staff"] as const,
   staffPayments: ["staff", "payments"] as const,
   tablewareProviders: ["tableware_providers"] as const,
@@ -450,6 +452,39 @@ export function useDeleteEventCost() {
   });
 }
 
+// ---------------------------- Roles de personal ----------------------------
+
+export function useStaffRoles() {
+  return useQuery({ queryKey: keys.staffRoles, queryFn: q.listStaffRoles });
+}
+
+/**
+ * Tocar un rol puede cambiar la tarifa heredada de cualquier empleado y de
+ * cualquier evento, así que se invalidan también esas vistas.
+ */
+function invalidateRoleViews(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: keys.staffRoles });
+  qc.invalidateQueries({ queryKey: keys.staff });
+  qc.invalidateQueries({ queryKey: keys.events });
+}
+
+export function useCreateStaffRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: StaffRoleInput) => q.createStaffRole(input),
+    onSuccess: () => invalidateRoleViews(qc),
+  });
+}
+
+export function useUpdateStaffRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Partial<StaffRoleInput> }) =>
+      q.updateStaffRole(id, input),
+    onSuccess: () => invalidateRoleViews(qc),
+  });
+}
+
 // ------------------------------- Personal -------------------------------
 
 export function useStaff() {
@@ -472,6 +507,8 @@ export function useUpdateStaff() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.staff });
       qc.invalidateQueries({ queryKey: keys.staffPayments });
+      // Cambiarle el rol o la tarifa mueve lo que se ve en cada evento.
+      qc.invalidateQueries({ queryKey: keys.events });
     },
   });
 }
@@ -499,6 +536,21 @@ export function useAddEventStaff() {
   });
 }
 
+/** Agrega varios empleados al evento en una sola operación. */
+export function useAddEventStaffBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      eventId,
+      inputs,
+    }: {
+      eventId: string;
+      inputs: EventStaffInput[];
+    }) => q.addEventStaffBulk(eventId, inputs),
+    onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
+  });
+}
+
 export function useUpdateEventStaff() {
   const qc = useQueryClient();
   return useMutation({
@@ -519,6 +571,16 @@ export function useRemoveEventStaff() {
   return useMutation({
     mutationFn: ({ id }: { id: string; eventId: string }) =>
       q.removeEventStaff(id),
+    onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
+  });
+}
+
+/** Quita varias asignaciones del evento en una sola operación. */
+export function useRemoveEventStaffBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids }: { ids: string[]; eventId: string }) =>
+      q.removeEventStaffBulk(ids),
     onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
   });
 }

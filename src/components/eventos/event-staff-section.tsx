@@ -15,9 +15,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EventStaffDialog } from "@/components/eventos/event-staff-dialog";
+import { EventStaffPickerDialog } from "@/components/eventos/event-staff-picker-dialog";
+import { RateCell } from "@/components/personal/rate-origin";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { useStaff, useEventStaff, useRemoveEventStaff } from "@/lib/hooks";
-import { computeEventStaff, effectiveRate, staffLineTotal } from "@/lib/personal";
+import {
+  useStaff,
+  useEventStaff,
+  useRemoveEventStaff,
+  useRemoveEventStaffBulk,
+} from "@/lib/hooks";
+import {
+  appliedRole,
+  computeEventStaff,
+  isRoleOverridden,
+  resolveRate,
+  staffLineTotal,
+} from "@/lib/personal";
 import { formatARS, formatNum } from "@/lib/format";
 import type { EventStaffWithStaff } from "@/lib/types";
 
@@ -25,10 +38,14 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
   const { data: allStaff } = useStaff();
   const { data: assignments } = useEventStaff(eventId);
   const remove = useRemoveEventStaff();
+  const removeBulk = useRemoveEventStaffBulk();
 
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<EventStaffWithStaff | null>(null);
   const [toDelete, setToDelete] = useState<EventStaffWithStaff | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const result = useMemo(
     () => computeEventStaff(assignments ?? []),
@@ -41,10 +58,21 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
     return (allStaff ?? []).filter((s) => s.active && !taken.has(s.id));
   }, [allStaff, assignments]);
 
-  function openNew() {
-    setEditing(null);
-    setDialogOpen(true);
+  /** La selección se limita a lo que sigue existiendo tras un refetch. */
+  const selectedIds = useMemo(() => {
+    const alive = new Set((assignments ?? []).map((a) => a.id));
+    return [...selected].filter((id) => alive.has(id));
+  }, [selected, assignments]);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
+
   function openEdit(es: EventStaffWithStaff) {
     setEditing(es);
     setDialogOpen(true);
@@ -63,6 +91,19 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
     }
   }
 
+  async function confirmBulkDelete() {
+    try {
+      await removeBulk.mutateAsync({ ids: selectedIds, eventId });
+      toast.success(`${selectedIds.length} empleados quitados del evento.`);
+      setSelected(new Set());
+      setBulkDeleteOpen(false);
+    } catch (e) {
+      toast.error("No se pudo quitar", {
+        description: e instanceof Error ? e.message : undefined,
+      });
+    }
+  }
+
   return (
     <Card className="overflow-hidden p-0">
       <div className="flex items-center justify-between gap-3 border-b bg-muted/40 px-4 py-2">
@@ -71,8 +112,18 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
           Personal
         </span>
         <div className="flex items-center gap-3">
+          {selectedIds.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              <Trash2 className="size-4 text-destructive" />
+              Quitar {selectedIds.length}
+            </Button>
+          )}
           <span className="text-sm font-medium">{formatARS(result.total)}</span>
-          <Button variant="outline" size="sm" onClick={openNew}>
+          <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
             <Plus className="size-4" />
             Agregar
           </Button>
@@ -95,7 +146,9 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-px" />
                   <TableHead>Empleado</TableHead>
+                  <TableHead>Rol</TableHead>
                   <TableHead className="text-right">Horas</TableHead>
                   <TableHead className="text-right">$ / h</TableHead>
                   <TableHead className="text-right">Total</TableHead>
@@ -104,56 +157,72 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {g.lines.map((es) => (
-                  <TableRow key={es.id}>
-                    <TableCell className="font-medium">
-                      {es.staff?.full_name ?? "—"}
-                      {es.staff?.role && (
-                        <span className="text-xs text-muted-foreground">
-                          {" "}
-                          · {es.staff.role}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatNum(es.hours)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {formatARS(effectiveRate(es))}
-                      {es.rate_override != null && (
-                        <span className="ml-1 text-xs text-amber-600">★</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatARS(staffLineTotal(es))}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={es.paid ? "default" : "secondary"}>
-                        {es.paid ? "Pagado" : "Pendiente"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => openEdit(es)}
-                          aria-label="Editar"
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => setToDelete(es)}
-                          aria-label="Quitar"
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {g.lines.map((es) => {
+                  const role = appliedRole(es);
+                  return (
+                    <TableRow key={es.id}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(es.id)}
+                          onChange={() => toggle(es.id)}
+                          className="size-4"
+                          aria-label={`Seleccionar ${es.staff?.full_name ?? ""}`}
+                        />
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {es.staff?.full_name ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {role?.name ?? (
+                          <span className="text-xs italic">sin rol</span>
+                        )}
+                        {isRoleOverridden(es) && (
+                          <span
+                            className="ml-1 text-xs text-amber-600"
+                            title="Rol cambiado solo para este evento"
+                          >
+                            (este evento)
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatNum(es.hours)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <RateCell resolved={resolveRate(es)} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatARS(staffLineTotal(es))}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={es.paid ? "default" : "secondary"}>
+                          {es.paid ? "Pagado" : "Pendiente"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => openEdit(es)}
+                            aria-label="Editar"
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => setToDelete(es)}
+                            aria-label="Quitar"
+                          >
+                            <Trash2 className="size-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -161,16 +230,22 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
       )}
 
       <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-        La tarifa con ★ es puntual de este evento. El seguimiento de pagos también
-        está en Personal → Pagos.
+        La etiqueta al lado de la tarifa dice de dónde sale: del rol, propia del
+        empleado o ajustada para este evento. El seguimiento de pagos está en
+        Personal → Pagos.
       </p>
 
+      <EventStaffPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        eventId={eventId}
+        available={available}
+      />
       <EventStaffDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         eventId={eventId}
         editing={editing}
-        available={available}
       />
       <ConfirmDialog
         open={!!toDelete}
@@ -179,6 +254,14 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
         description={`Se quitará "${toDelete?.staff?.full_name ?? ""}" de este evento.`}
         onConfirm={confirmDelete}
         loading={remove.isPending}
+      />
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        title="Quitar del evento"
+        description={`Se quitarán ${selectedIds.length} empleados de este evento.`}
+        onConfirm={confirmBulkDelete}
+        loading={removeBulk.isPending}
       />
     </Card>
   );

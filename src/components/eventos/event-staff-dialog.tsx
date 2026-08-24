@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,33 +15,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useAddEventStaff, useUpdateEventStaff } from "@/lib/hooks";
+import { RateOriginBadge } from "@/components/personal/rate-origin";
+import { useStaffRoles, useUpdateEventStaff } from "@/lib/hooks";
 import { formatARS } from "@/lib/format";
-import { staffCategoryLabel, type EventStaffWithStaff, type Staff } from "@/lib/types";
+import { rateSourceLabel, resolveRate } from "@/lib/personal";
+import { staffCategoryLabel, type EventStaffWithStaff } from "@/lib/types";
 
 export function EventStaffDialog({
   open,
   onOpenChange,
   eventId,
   editing,
-  available,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   eventId: string;
-  /** Asignación a editar, o null para crear una nueva. */
+  /** Asignación a editar. Para agregar se usa EventStaffPickerDialog. */
   editing: EventStaffWithStaff | null;
-  /** Empleados activos disponibles para agregar (solo se usa al crear). */
-  available: Staff[];
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        {open && (
+        {open && editing && (
           <EventStaffForm
             eventId={eventId}
             editing={editing}
-            available={available}
             onDone={() => onOpenChange(false)}
           />
         )}
@@ -52,68 +51,66 @@ export function EventStaffDialog({
 function EventStaffForm({
   eventId,
   editing,
-  available,
   onDone,
 }: {
   eventId: string;
-  editing: EventStaffWithStaff | null;
-  available: Staff[];
+  editing: EventStaffWithStaff;
   onDone: () => void;
 }) {
-  const isEdit = !!editing;
-  const add = useAddEventStaff();
   const update = useUpdateEventStaff();
+  const { data: roles } = useStaffRoles();
 
-  const [staffId, setStaffId] = useState(
-    editing?.staff_id ?? available[0]?.id ?? "",
-  );
-  const [hours, setHours] = useState(
-    editing?.hours != null ? String(editing.hours) : "",
-  );
+  const [roleId, setRoleId] = useState(editing.role_id ?? "");
+  const [hours, setHours] = useState(String(editing.hours ?? ""));
   const [rate, setRate] = useState(
-    editing?.rate_override != null ? String(editing.rate_override) : "",
+    editing.rate_override != null ? String(editing.rate_override) : "",
   );
 
-  const loading = add.isPending || update.isPending;
+  const habitual = editing.staff?.staff_role ?? null;
 
-  const selected: Staff | null = isEdit
-    ? editing!.staff
-    : (available.find((s) => s.id === staffId) ?? null);
-  const baseRate = selected?.hourly_rate ?? 0;
-  const effRate = rate.trim() ? Number(rate.replace(",", ".")) : baseRate;
+  const options = useMemo(
+    () => (roles ?? []).filter((r) => r.active || r.id === editing.role_id),
+    [roles, editing.role_id],
+  );
+
   const hoursN = hours.trim() ? Number(hours.replace(",", ".")) : 0;
-  const lineTotal =
-    Number.isFinite(effRate) && Number.isFinite(hoursN) ? effRate * hoursN : 0;
+  const override = rate.trim() ? Number(rate.replace(",", ".")) : null;
+
+  // Se arma la asignación tal como quedaría y se resuelve con la misma función
+  // que usa la tabla, para que la vista previa no pueda desincronizarse.
+  const preview = useMemo(() => {
+    const pendingRole = options.find((r) => r.id === roleId) ?? null;
+    return resolveRate({
+      ...editing,
+      role_id: roleId || null,
+      event_role: pendingRole,
+      rate_override:
+        override != null && Number.isFinite(override) ? override : null,
+    });
+  }, [editing, options, roleId, override]);
+
+  const lineTotal = Number.isFinite(hoursN) ? hoursN * preview.rate : 0;
 
   async function handleSave() {
-    if (!isEdit && !staffId) {
-      toast.error("Elegí un empleado.");
-      return;
-    }
     if (!hours.trim() || Number.isNaN(hoursN) || hoursN < 0) {
       toast.error("Horas inválidas.");
       return;
     }
-    const override = rate.trim() ? Number(rate.replace(",", ".")) : null;
     if (override != null && (Number.isNaN(override) || override < 0)) {
       toast.error("Tarifa inválida.");
       return;
     }
     try {
-      if (isEdit) {
-        await update.mutateAsync({
-          id: editing!.id,
-          eventId,
-          input: { hours: hoursN, rate_override: override },
-        });
-        toast.success("Personal actualizado.");
-      } else {
-        await add.mutateAsync({
-          eventId,
-          input: { staff_id: staffId, hours: hoursN, rate_override: override },
-        });
-        toast.success("Empleado agregado al evento.");
-      }
+      await update.mutateAsync({
+        id: editing.id,
+        eventId,
+        input: {
+          hours: hoursN,
+          rate_override: override,
+          role_id: roleId || null,
+        },
+      });
+      toast.success("Personal actualizado.");
       onDone();
     } catch (e) {
       toast.error("No se pudo guardar", {
@@ -125,44 +122,49 @@ function EventStaffForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>
-          {isEdit ? "Editar participación" : "Agregar empleado al evento"}
-        </DialogTitle>
+        <DialogTitle>Editar participación</DialogTitle>
         <DialogDescription>
-          Horas trabajadas × tarifa = total a pagar. La tarifa puntual no cambia
-          la tarifa base global del empleado.
+          Lo que cambies acá vale solo para este evento: no toca el rol habitual
+          ni la tarifa global del empleado.
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <Label htmlFor="es-staff">Empleado</Label>
-          {isEdit ? (
-            <Input
-              id="es-staff"
-              value={`${editing!.staff?.full_name ?? "—"} · ${staffCategoryLabel(
-                editing!.staff?.category ?? "",
-              )}`}
-              disabled
-            />
-          ) : available.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No quedan empleados activos sin asignar.
+          <Input
+            id="es-staff"
+            value={`${editing.staff?.full_name ?? "—"} · ${staffCategoryLabel(
+              editing.staff?.category ?? "",
+            )}`}
+            disabled
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="es-role">Rol en este evento</Label>
+          <NativeSelect
+            id="es-role"
+            value={roleId}
+            onChange={(e) => setRoleId(e.target.value)}
+          >
+            <option value="">
+              {habitual ? `Rol habitual (${habitual.name})` : "Sin rol"}
+            </option>
+            {options.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name} · {staffCategoryLabel(r.category)} ·{" "}
+                {formatARS(r.hourly_rate)}/h
+              </option>
+            ))}
+          </NativeSelect>
+          {preview.roleOverridden && (
+            <p className="text-xs text-amber-600">
+              Trabaja en otro puesto solo en este evento. Su rol habitual sigue
+              siendo {habitual?.name ?? "el que tenga asignado"}.
             </p>
-          ) : (
-            <NativeSelect
-              id="es-staff"
-              value={staffId}
-              onChange={(e) => setStaffId(e.target.value)}
-            >
-              {available.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name} · {staffCategoryLabel(s.category)} ·{" "}
-                  {formatARS(s.hourly_rate)}/h
-                </option>
-              ))}
-            </NativeSelect>
           )}
         </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-2">
             <Label htmlFor="es-hours">Horas</Label>
@@ -175,30 +177,57 @@ function EventStaffForm({
             />
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="es-rate">Tarifa puntual ($/h)</Label>
-            <Input
-              id="es-rate"
-              inputMode="decimal"
-              value={rate}
-              onChange={(e) => setRate(e.target.value)}
-              placeholder={`Base: ${formatARS(baseRate)}`}
-            />
+            <Label htmlFor="es-rate">Tarifa para este evento ($/h)</Label>
+            <div className="flex gap-1">
+              <Input
+                id="es-rate"
+                inputMode="decimal"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                placeholder="Vacío = heredada"
+              />
+              {rate.trim() !== "" && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setRate("")}
+                  aria-label="Volver a la tarifa heredada"
+                  title="Volver a la tarifa heredada"
+                >
+                  <RotateCcw className="size-4" />
+                </Button>
+              )}
+            </div>
           </div>
         </div>
-        <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm">
-          <span className="text-muted-foreground">Total a pagar</span>
-          <span className="font-semibold tabular-nums">{formatARS(lineTotal)}</span>
+
+        <div className="flex flex-col gap-1 rounded-md bg-muted/40 px-3 py-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Tarifa aplicada</span>
+            <span className="flex items-center gap-2">
+              <RateOriginBadge resolved={preview} />
+              <span className="font-medium tabular-nums">
+                {formatARS(preview.rate)}/h
+              </span>
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {rateSourceLabel(preview)}
+          </p>
+          <div className="mt-1 flex items-center justify-between border-t pt-1">
+            <span className="text-muted-foreground">Total a pagar</span>
+            <span className="font-semibold tabular-nums">
+              {formatARS(lineTotal)}
+            </span>
+          </div>
         </div>
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onDone}>
           Cancelar
         </Button>
-        <Button
-          onClick={handleSave}
-          disabled={loading || (!isEdit && available.length === 0)}
-        >
-          {loading ? "Guardando…" : "Guardar"}
+        <Button onClick={handleSave} disabled={update.isPending}>
+          {update.isPending ? "Guardando…" : "Guardar"}
         </Button>
       </DialogFooter>
     </>
