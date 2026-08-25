@@ -24,6 +24,24 @@ export function unitDimension(u: UnitKind): "mass" | "volume" | "count" {
   return "count";
 }
 
+/**
+ * Campos de archivado (migración 0020), comunes a las cinco entidades que
+ * se archivan en vez de borrarse: ingredientes, recetas, productos, bebidas
+ * y sobrantes.
+ *
+ * Mismo mecanismo que ya usan `staff` y `staff_roles` desde 0007/0018, para
+ * no tener dos formas distintas de decir lo mismo en el mismo sistema.
+ */
+export type Archivable = {
+  /**
+   * false = archivado. Desaparece de listados y selectores, pero la fila
+   * sigue existiendo y lo que ya la referenciaba la sigue usando.
+   */
+  active: boolean;
+  /** Cuándo se archivó. Lo mantiene un trigger a partir de `active`. */
+  archived_at: string | null;
+};
+
 export type Provider = {
   id: string;
   name: string;
@@ -75,7 +93,7 @@ export type Product = {
   leftover_shelf_life_days: number | null;
   updated_at: string;
   created_at: string;
-};
+} & Archivable;
 
 export type Ingredient = {
   id: string;
@@ -92,7 +110,7 @@ export type Ingredient = {
   market_price_source: "auto" | "manual" | null;
   notes: string | null;
   created_at: string;
-};
+} & Archivable;
 
 /** Ingrediente con su producto vinculado embebido (join). */
 export type IngredientWithProduct = Ingredient & {
@@ -168,7 +186,7 @@ export type Recipe = {
   description: string | null;
   notes: string | null;
   created_at: string;
-};
+} & Archivable;
 
 export type RecipeItem = {
   id: string;
@@ -229,6 +247,17 @@ export type ImportRecipePlan = {
 // -------------------------------- Eventos --------------------------------
 
 export type EventStatus = "activo" | "finalizado";
+
+/**
+ * true = el evento sigue en planificación y sus números se recalculan con el
+ * catálogo vivo. false = está cerrado y sus números son historia contable.
+ *
+ * Nada que escriba en la base por el solo hecho de abrir la pantalla puede
+ * correr sobre un evento cerrado. Ver `useMarketPriceUpdater`.
+ */
+export function isEventLive(event: { status: EventStatus }): boolean {
+  return event.status === "activo";
+}
 
 export type EventRecipeRole =
   | "bocado"
@@ -331,7 +360,7 @@ export type BarBeverage = {
   market_price_updated_at: string | null;
   sort_order: number;
   created_at: string;
-};
+} & Archivable;
 
 export type BarBeverageInput = {
   name: string;
@@ -709,7 +738,7 @@ export type Leftover = {
   note: string | null;
   created_at: string;
   updated_at: string;
-};
+} & Archivable;
 
 /** Sobrante con producto y proveedor embebidos (join para el listado). */
 export type LeftoverWithProduct = Leftover & {

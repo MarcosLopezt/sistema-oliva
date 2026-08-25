@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { RateCell } from "@/components/personal/rate-origin";
 import { useStaffPayments, useUpdateEventStaff } from "@/lib/hooks";
+import { toastUndo } from "@/lib/undo";
 import { formatARS, formatNum, formatDate } from "@/lib/format";
 import { resolveRate, staffLineTotal } from "@/lib/personal";
 import { staffCategoryLabel, type EventStaffWithEvent } from "@/lib/types";
@@ -119,14 +120,32 @@ function StaffPaymentCard({ group }: { group: StaffGroup }) {
   const update = useUpdateEventStaff();
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  /**
+   * Pagado/pendiente es un toggle reversible que se repite mucho: se aplica
+   * al instante, sin confirmación, y se ofrece deshacer. El valor previo se
+   * captura ANTES de mutar, para que "Deshacer" restituya ese y no lo que
+   * haya quedado en la caché.
+   */
   async function togglePaid(es: EventStaffWithEvent) {
     if (!es.event) return;
+    const eventId = es.event.id;
+    const eventName = es.event.name;
+    const previous = es.paid;
     setBusyId(es.id);
     try {
       await update.mutateAsync({
         id: es.id,
-        eventId: es.event.id,
-        input: { paid: !es.paid },
+        eventId,
+        input: { paid: !previous },
+      });
+      toastUndo({
+        message: previous ? "Marcado como pendiente." : "Marcado como pagado.",
+        description: `${group.name} · ${eventName}`,
+        onUndo: () =>
+          update.mutateAsync({ id: es.id, eventId, input: { paid: previous } }),
+        undoneMessage: previous
+          ? "Vuelve a figurar como pagado."
+          : "Vuelve a figurar como pendiente.",
       });
     } catch (e) {
       toast.error("No se pudo actualizar", {

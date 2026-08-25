@@ -37,13 +37,11 @@ import { NativeSelect } from "@/components/native-select";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   useAllTablewareItems,
-  useEventTableware,
   useAddEventTableware,
   useUpdateEventTableware,
   useRemoveEventTableware,
 } from "@/lib/hooks";
 import {
-  computeVajillaTotal,
   buildVajillaOrderMessage,
   calcSuggestedQty,
 } from "@/lib/queries";
@@ -54,6 +52,7 @@ import type {
   EventTablewareWithItem,
   EventTablewareInput,
 } from "@/lib/types";
+import { useEventLocked } from "@/components/eventos/event-lock";
 
 // ─── Diálogo agregar / editar ítem ──────────────────────────────────────────
 
@@ -526,17 +525,29 @@ function OrderDialog({
 
 // ─── Sección principal ───────────────────────────────────────────────────────
 
-export function EventVajillaSection({ event }: { event: EventRow }) {
-  const { data: tableware, isLoading } = useEventTableware(event.id);
+/**
+ * `vajilla` viene calculada de afuera: del catálogo vivo si el evento esta
+ * abierto, o de la foto del cierre si está finalizado. Congelar las líneas
+ * además conserva el precio que tenía cada ítem el día del evento, aunque
+ * después se lo edite o se archive el proveedor.
+ */
+export function EventVajillaSection({
+  event,
+  vajilla,
+}: {
+  event: EventRow;
+  vajilla: { lines: EventTablewareWithItem[]; total: number } | null;
+}) {
   const del = useRemoveEventTableware();
+  const locked = useEventLocked();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<EventTablewareWithItem | null>(null);
   const [toDelete, setToDelete] = useState<EventTablewareWithItem | null>(null);
   const [orderOpen, setOrderOpen] = useState(false);
 
-  const items = tableware ?? [];
-  const subtotal = useMemo(() => computeVajillaTotal(items), [items]);
+  const items = vajilla?.lines ?? [];
+  const subtotal = vajilla?.total ?? 0;
 
   async function confirmDelete() {
     if (!toDelete) return;
@@ -551,7 +562,7 @@ export function EventVajillaSection({ event }: { event: EventRow }) {
     }
   }
 
-  if (isLoading)
+  if (!vajilla)
     return <p className="text-sm text-muted-foreground">Cargando vajilla…</p>;
 
   return (
@@ -572,17 +583,19 @@ export function EventVajillaSection({ event }: { event: EventRow }) {
                 Pedido
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setEditing(null);
-                setDialogOpen(true);
-              }}
-            >
-              <Plus className="size-4" />
-              Agregar
-            </Button>
+            {!locked && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditing(null);
+                  setDialogOpen(true);
+                }}
+              >
+                <Plus className="size-4" />
+                Agregar
+              </Button>
+            )}
           </div>
         </div>
 
@@ -649,25 +662,29 @@ export function EventVajillaSection({ event }: { event: EventRow }) {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => {
-                            setEditing(e);
-                            setDialogOpen(true);
-                          }}
-                          aria-label="Editar"
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => setToDelete(e)}
-                          aria-label="Eliminar"
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+                        {!locked && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => {
+                                setEditing(e);
+                                setDialogOpen(true);
+                              }}
+                              aria-label="Editar"
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => setToDelete(e)}
+                              aria-label="Eliminar"
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

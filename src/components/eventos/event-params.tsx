@@ -7,10 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { useUpdateEvent } from "@/lib/hooks";
+import { useEventLocked } from "@/components/eventos/event-lock";
 import type { EventRow } from "@/lib/types";
 
 export function EventParams({ event }: { event: EventRow }) {
   const update = useUpdateEvent();
+  const locked = useEventLocked();
   const [bocados, setBocados] = useState(String(event.bocados_per_person));
   const [extra, setExtra] = useState(String(event.principal_extra));
   const [veggie, setVeggie] = useState(String(Math.round(event.veggie_pct * 100)));
@@ -49,22 +51,30 @@ export function EventParams({ event }: { event: EventRow }) {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          <Field label="Bocados x persona" value={bocados} onChange={setBocados} />
+          <Field
+            label="Bocados x persona"
+            value={bocados}
+            onChange={setBocados}
+            disabled={locked}
+          />
           <Field
             label="Cubiertos extra"
             hint="Se suman a principales y bocados"
             value={extra}
             onChange={setExtra}
+            disabled={locked}
           />
-          <Field label="% Veggie" value={veggie} onChange={setVeggie} suffix="%" />
-          <Field label="% Merma" value={merma} onChange={setMerma} suffix="%" />
-          <Field label="% Margen" value={margin} onChange={setMargin} suffix="%" />
+          <Field label="% Veggie" value={veggie} onChange={setVeggie} suffix="%" disabled={locked} />
+          <Field label="% Merma" value={merma} onChange={setMerma} suffix="%" disabled={locked} />
+          <Field label="% Margen" value={margin} onChange={setMargin} suffix="%" disabled={locked} />
         </div>
-        <div className="flex justify-end">
-          <Button onClick={save} disabled={update.isPending}>
-            {update.isPending ? "Guardando…" : "Guardar parámetros"}
-          </Button>
-        </div>
+        {!locked && (
+          <div className="flex justify-end">
+            <Button onClick={save} disabled={update.isPending}>
+              {update.isPending ? "Guardando…" : "Guardar parámetros"}
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -76,12 +86,14 @@ function Field({
   onChange,
   suffix,
   hint,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   suffix?: string;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -91,6 +103,7 @@ function Field({
           inputMode="decimal"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
           className={suffix ? "pr-6" : ""}
         />
         {suffix && (

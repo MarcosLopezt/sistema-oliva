@@ -21,6 +21,7 @@ import {
   useRecalcNonManualTableware,
 } from "@/lib/hooks";
 import { calcSuggestedQty } from "@/lib/queries";
+import { useEventLocked } from "@/components/eventos/event-lock";
 import { formatNum } from "@/lib/format";
 import type { EventRow, EventTablewareWithItem } from "@/lib/types";
 
@@ -30,11 +31,13 @@ function InlineNum({
   onCommit,
   placeholder,
   min,
+  disabled,
 }: {
   value: number;
   onCommit: (raw: string) => void;
   placeholder?: string;
   min?: number;
+  disabled?: boolean;
 }) {
   const [edit, setEdit] = useState<string | null>(null);
   return (
@@ -44,6 +47,7 @@ function InlineNum({
       value={edit ?? String(value)}
       placeholder={placeholder}
       min={min}
+      disabled={disabled}
       onChange={(e) => setEdit(e.target.value)}
       onBlur={(e) => {
         onCommit(e.target.value);
@@ -67,6 +71,7 @@ export function EventVajillaParams({
   const updateEvent = useUpdateEvent();
   const updateRow = useUpdateEventTableware();
   const recalc = useRecalcNonManualTableware();
+  const locked = useEventLocked();
 
   // Margen global —— guarda y recalcula no-manuales al confirmar
   async function commitGlobalMargin(raw: string) {
@@ -180,6 +185,7 @@ export function EventVajillaParams({
               className="h-7 w-16 text-center text-sm"
               inputMode="decimal"
               defaultValue={String(event.vajilla_margin)}
+              disabled={locked}
               onBlur={(e) => commitGlobalMargin(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.currentTarget.blur();
@@ -197,15 +203,17 @@ export function EventVajillaParams({
               {staleCount} ítem{staleCount !== 1 ? "s" : ""} desactualizado{staleCount !== 1 ? "s" : ""}
             </span>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRecalc}
-            disabled={recalc.isPending}
-          >
-            <RotateCcw className="size-4" />
-            Recalcular automáticos
-          </Button>
+          {!locked && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRecalc}
+              disabled={recalc.isPending}
+            >
+              <RotateCcw className="size-4" />
+              Recalcular automáticos
+            </Button>
+          )}
         </div>
       </div>
 
@@ -244,6 +252,7 @@ export function EventVajillaParams({
                         value={e.multiplier}
                         onCommit={(v) => commitMultiplier(e, v)}
                         min={0.01}
+                        disabled={locked}
                       />
                     </TableCell>
 
@@ -253,6 +262,7 @@ export function EventVajillaParams({
                         onCommit={(v) => commitMarginOverride(e, v)}
                         placeholder={String(event.vajilla_margin)}
                         min={0}
+                        disabled={locked}
                       />
                     </TableCell>
 

@@ -3,14 +3,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { toast } from "sonner";
 import {
   Plus,
   Pencil,
-  Trash2,
+  Archive,
   Upload,
   ArrowLeft,
   Info,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -23,10 +23,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
 import { ProductDialog } from "@/components/proveedores/product-dialog";
 import { ExcelImportDialog } from "@/components/proveedores/excel-import-dialog";
-import { ConfirmDialog } from "@/components/confirm-dialog";
-import { useProviders, useProducts, useDeleteProduct } from "@/lib/hooks";
+import { ArchiveDialog } from "@/components/archivado/archive-dialog";
+import { ArchivedPanel } from "@/components/archivado/archived-panel";
+import {
+  ArchiveTabs,
+  BulkActionBar,
+  RowCheckbox,
+  SelectAllCheckbox,
+} from "@/components/archivado/bulk-bar";
+import { useBulkSelection } from "@/components/archivado/use-bulk-selection";
+import { toRow } from "@/lib/archivado";
+import { useProviders, useProducts, useArchivedProducts } from "@/lib/hooks";
 import {
   formatARS,
   formatDate,
@@ -42,12 +52,30 @@ export default function ProviderProductsPage() {
   const { data: providers } = useProviders();
   const provider = providers?.find((p) => p.id === id);
   const { data: products, isLoading } = useProducts(id);
-  const del = useDeleteProduct();
+  const { data: archived, isLoading: loadingArchived } =
+    useArchivedProducts(id);
 
+  const [tab, setTab] = useState<"vigentes" | "archivados">("vigentes");
   const [prodOpen, setProdOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
-  const [toDelete, setToDelete] = useState<Product | null>(null);
+  const [search, setSearch] = useState("");
+
+  const all = useMemo(() => products ?? [], [products]);
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return all;
+    return all.filter(
+      (p) =>
+        p.name.toLowerCase().includes(term) ||
+        (p.code ?? "").toLowerCase().includes(term),
+    );
+  }, [all, search]);
+
+  // Sobre `filtered`: "seleccionar todos" respeta el buscador activo.
+  const sel = useBulkSelection(filtered);
 
   // Aviso suave: dentro de un mismo proveedor lo normal es que todos los
   // precios estén sobre la misma base. Si están mezclados, probablemente se
@@ -66,18 +94,6 @@ export default function ProviderProductsPage() {
     setEditing(p);
     setProdOpen(true);
   }
-  async function confirmDelete() {
-    if (!toDelete) return;
-    try {
-      await del.mutateAsync(toDelete.id);
-      toast.success("Producto eliminado.");
-      setToDelete(null);
-    } catch (e) {
-      toast.error("No se pudo eliminar", {
-        description: e instanceof Error ? e.message : undefined,
-      });
-    }
-  }
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -95,7 +111,7 @@ export default function ProviderProductsPage() {
             {provider?.name ?? "Proveedor"}
           </h1>
           <p className="text-muted-foreground">
-            {products?.length ?? 0} productos en la lista de precios.
+            {all.length} productos en la lista de precios.
           </p>
         </div>
         <div className="flex gap-2">
@@ -110,6 +126,26 @@ export default function ProviderProductsPage() {
         </div>
       </div>
 
+      <div className="mb-4">
+        <ArchiveTabs
+          value={tab}
+          onChange={setTab}
+          archivedCount={archived?.length}
+        />
+      </div>
+
+      {tab === "archivados" ? (
+        <ArchivedPanel
+          entity="products"
+          isLoading={loadingArchived}
+          rows={(archived ?? []).map((p) => ({
+            ...toRow.product(p),
+            archived_at: p.archived_at,
+            detail: p.code,
+          }))}
+        />
+      ) : (
+        <>
       {mixedIva && (
         <Card className="mb-4 border-sky-200 bg-sky-50 p-4 text-sm dark:bg-sky-950/20">
           <div className="flex items-start gap-2 text-sky-700 dark:text-sky-400">
@@ -123,17 +159,38 @@ export default function ProviderProductsPage() {
         </Card>
       )}
 
+      <div className="mb-4">
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre o código…"
+            className="pl-9"
+          />
+        </div>
+      </div>
+
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Cargando…</p>
-      ) : !products || products.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <Card className="p-8 text-center text-sm text-muted-foreground">
-          Sin productos. Importá la lista de precios o agregá uno a mano.
+          {all.length === 0
+            ? "Sin productos. Importá la lista de precios o agregá uno a mano."
+            : "Ningún producto coincide con la búsqueda."}
         </Card>
       ) : (
         <Card className="overflow-hidden p-0">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-px">
+                  <SelectAllCheckbox
+                    checked={sel.allVisibleSelected}
+                    indeterminate={sel.someVisibleSelected}
+                    onToggle={sel.toggleAll}
+                  />
+                </TableHead>
                 <TableHead>Producto</TableHead>
                 <TableHead>Unidad</TableHead>
                 <TableHead className="text-right">
@@ -155,8 +212,15 @@ export default function ProviderProductsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.map((p) => (
+              {filtered.map((p) => (
                 <TableRow key={p.id}>
+                  <TableCell>
+                    <RowCheckbox
+                      checked={sel.isSelected(p.id)}
+                      onToggle={() => sel.toggle(p.id)}
+                      label={p.name}
+                    />
+                  </TableCell>
                   <TableCell className="max-w-[320px]">
                     <div className="truncate font-medium">{p.name}</div>
                     {p.code && (
@@ -210,10 +274,14 @@ export default function ProviderProductsPage() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        onClick={() => setToDelete(p)}
+                        onClick={() => {
+                          sel.clear();
+                          sel.toggle(p.id);
+                          setArchiveOpen(true);
+                        }}
                         aria-label="Eliminar"
                       >
-                        <Trash2 className="size-4 text-destructive" />
+                        <Archive className="size-4 text-destructive" />
                       </Button>
                     </div>
                   </TableCell>
@@ -222,6 +290,15 @@ export default function ProviderProductsPage() {
             </TableBody>
           </Table>
         </Card>
+      )}
+
+          <BulkActionBar
+            count={sel.count}
+            noun={{ singular: "producto", plural: "productos" }}
+            onClear={sel.clear}
+            onArchive={() => setArchiveOpen(true)}
+          />
+        </>
       )}
 
       <ProductDialog
@@ -235,13 +312,12 @@ export default function ProviderProductsPage() {
         onOpenChange={setImportOpen}
         providerId={id}
       />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Eliminar producto"
-        description={`Se eliminará "${toDelete?.name}".`}
-        onConfirm={confirmDelete}
-        loading={del.isPending}
+      <ArchiveDialog
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        entity="products"
+        rows={sel.selected.map(toRow.product)}
+        onDone={sel.clear}
       />
     </div>
   );

@@ -26,19 +26,35 @@ import {
 } from "@/lib/hooks";
 import {
   appliedRole,
-  computeEventStaff,
   isRoleOverridden,
   resolveRate,
   staffLineTotal,
+  type EventStaffResult,
 } from "@/lib/personal";
+import { useEventLocked } from "@/components/eventos/event-lock";
+
+/** Mientras el cálculo no llegó todavía. */
+const EMPTY_STAFF: EventStaffResult = { groups: [], total: 0 };
 import { formatARS, formatNum } from "@/lib/format";
 import type { EventStaffWithStaff } from "@/lib/types";
 
-export function EventStaffSection({ eventId }: { eventId: string }) {
+/**
+ * `personal` viene calculado de afuera (catálogo vivo o foto del cierre); es
+ * lo que se MUESTRA. Las asignaciones crudas se siguen leyendo acá porque las
+ * necesita la maquinaria de edición, que solo corre con el evento abierto.
+ */
+export function EventStaffSection({
+  eventId,
+  personal,
+}: {
+  eventId: string;
+  personal: EventStaffResult | null;
+}) {
   const { data: allStaff } = useStaff();
   const { data: assignments } = useEventStaff(eventId);
   const remove = useRemoveEventStaff();
   const removeBulk = useRemoveEventStaffBulk();
+  const locked = useEventLocked();
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -47,10 +63,7 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const result = useMemo(
-    () => computeEventStaff(assignments ?? []),
-    [assignments],
-  );
+  const result = personal ?? EMPTY_STAFF;
 
   // Empleados activos que todavía no están asignados a este evento.
   const available = useMemo(() => {
@@ -112,7 +125,7 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
           Personal
         </span>
         <div className="flex items-center gap-3">
-          {selectedIds.length > 0 && (
+          {!locked && selectedIds.length > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -123,10 +136,12 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
             </Button>
           )}
           <span className="text-sm font-medium">{formatARS(result.total)}</span>
-          <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
-            <Plus className="size-4" />
-            Agregar
-          </Button>
+          {!locked && (
+            <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
+              <Plus className="size-4" />
+              Agregar
+            </Button>
+          )}
         </div>
       </div>
 
@@ -162,13 +177,15 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
                   return (
                     <TableRow key={es.id}>
                       <TableCell>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(es.id)}
-                          onChange={() => toggle(es.id)}
-                          className="size-4"
-                          aria-label={`Seleccionar ${es.staff?.full_name ?? ""}`}
-                        />
+                        {!locked && (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(es.id)}
+                            onChange={() => toggle(es.id)}
+                            className="size-4"
+                            aria-label={`Seleccionar ${es.staff?.full_name ?? ""}`}
+                          />
+                        )}
                       </TableCell>
                       <TableCell className="font-medium">
                         {es.staff?.full_name ?? "—"}
@@ -202,22 +219,26 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => openEdit(es)}
-                            aria-label="Editar"
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => setToDelete(es)}
-                            aria-label="Quitar"
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
+                          {!locked && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => openEdit(es)}
+                                aria-label="Editar"
+                              >
+                                <Pencil className="size-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => setToDelete(es)}
+                                aria-label="Quitar"
+                              >
+                                <Trash2 className="size-4 text-destructive" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -232,7 +253,8 @@ export function EventStaffSection({ eventId }: { eventId: string }) {
       <p className="border-t px-4 py-2 text-xs text-muted-foreground">
         La etiqueta al lado de la tarifa dice de dónde sale: del rol, propia del
         empleado o ajustada para este evento. El seguimiento de pagos está en
-        Personal → Pagos.
+        Personal → Pagos, y se puede marcar pagado aunque el evento esté
+        finalizado: cobrar pasa después del evento y no toca su costo.
       </p>
 
       <EventStaffPickerDialog

@@ -16,11 +16,32 @@ import {
 import { Card } from "@/components/ui/card";
 import { ProviderDialog } from "@/components/proveedores/provider-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { useProviders, useDeleteProvider } from "@/lib/hooks";
+import { useProviders, useDeleteProvider, useAllProducts } from "@/lib/hooks";
 import type { Provider } from "@/lib/types";
+
+/**
+ * Traduce el rechazo de la base a algo que se entienda.
+ *
+ * Desde la migración 0021, borrar un proveedor arrastra sus productos y esa
+ * cascada choca contra el RESTRICT de `ingredients` y `leftovers`. Es el
+ * comportamiento correcto —antes se llevaba la lista de precios en silencio—
+ * pero el mensaje que devuelve Postgres no le sirve a nadie.
+ */
+function deleteErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : "";
+  if (/violates foreign key|foreign key constraint/i.test(raw)) {
+    return (
+      "Alguno de sus productos está vinculado a un ingrediente o tiene " +
+      "sobrantes registrados. Desvinculá o archivá esos productos primero: " +
+      "borrarlos ahora dejaría ingredientes sin precio y borraría sobrantes."
+    );
+  }
+  return raw;
+}
 
 export default function ProveedoresPage() {
   const { data: providers, isLoading, error } = useProviders();
+  const { data: products } = useAllProducts();
   const del = useDeleteProvider();
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -43,11 +64,17 @@ export default function ProveedoresPage() {
       toast.success("Proveedor eliminado.");
       setToDelete(null);
     } catch (e) {
-      toast.error("No se pudo eliminar", {
-        description: e instanceof Error ? e.message : undefined,
+      toast.error("No se pudo eliminar el proveedor", {
+        description: deleteErrorMessage(e),
+        duration: 10000,
       });
     }
   }
+
+  /** Cuántos productos vigentes se irían con el proveedor. */
+  const productCount = (products ?? []).filter(
+    (p) => p.provider_id === toDelete?.id,
+  ).length;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -138,7 +165,22 @@ export default function ProveedoresPage() {
         open={!!toDelete}
         onOpenChange={(o) => !o && setToDelete(null)}
         title="Eliminar proveedor"
-        description={`Se eliminará "${toDelete?.name}" y todos sus productos. Esta acción no se puede deshacer.`}
+        description={`Se eliminará “${toDelete?.name}” junto con toda su lista de precios.`}
+        details={
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>
+              Se borran <strong>{productCount}</strong> producto
+              {productCount === 1 ? "" : "s"}. Esto no se puede deshacer: los
+              proveedores no se archivan.
+            </li>
+            <li>
+              Si alguno de esos productos está vinculado a un ingrediente o
+              tiene sobrantes registrados, la operación se va a{" "}
+              <strong>rechazar</strong> para no dejar ingredientes sin precio.
+              En ese caso, archivá los productos desde la ficha del proveedor.
+            </li>
+          </ul>
+        }
         onConfirm={confirmDelete}
         loading={del.isPending}
       />

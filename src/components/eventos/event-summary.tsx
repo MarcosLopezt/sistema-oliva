@@ -1,42 +1,31 @@
 "use client";
 
-import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  useEventRecipes,
-  useEventCosts,
-  useEventStaff,
-  useBarSettings,
-  useBarBeverages,
-  useEventTableware,
-} from "@/lib/hooks";
-import { computeMateriaPrima } from "@/lib/materia-prima";
-import { computeBarra } from "@/lib/barra";
-import { computeEventStaff } from "@/lib/personal";
-import { computeEventSummary } from "@/lib/resumen";
-import { computeVajillaTotal } from "@/lib/queries";
 import { formatARS } from "@/lib/format";
+import type { EventCostView } from "@/lib/snapshot";
 import type { EventRow } from "@/lib/types";
 
 function pct(n: number): string {
   return `${n.toFixed(1).replace(".", ",")}%`;
 }
 
-export function EventSummary({ event }: { event: EventRow }) {
-  const { data: selections } = useEventRecipes(event.id);
-  const { data: costs } = useEventCosts(event.id);
-  const { data: staff } = useEventStaff(event.id);
-  const { data: settings } = useBarSettings();
-  const { data: beverages } = useBarBeverages();
-  const { data: tableware } = useEventTableware(event.id);
-
-  const summary = useMemo(() => {
-    const mp = computeMateriaPrima(event, selections ?? []);
-    const barra = computeBarra(event, settings, beverages ?? []);
-    const staffTotal = computeEventStaff(staff ?? []).total;
-    const vajillaTotal = computeVajillaTotal(tableware ?? []);
-    return computeEventSummary(event, mp, barra, costs ?? [], staffTotal, vajillaTotal);
-  }, [event, selections, settings, beverages, costs, staff, tableware]);
+/**
+ * El resumen ya no calcula nada: recibe el desglose armado.
+ *
+ * Antes cargaba las seis fuentes por su cuenta y repetía el cálculo completo
+ * que las secciones de abajo ya habían hecho. Ahora la página lo calcula una
+ * sola vez y decide si viene del catálogo vivo o de la foto del cierre — este
+ * componente no se entera de la diferencia, y por eso no puede mostrar algo
+ * distinto de lo que quedó congelado.
+ */
+export function EventSummary({
+  event,
+  view,
+}: {
+  event: EventRow;
+  view: EventCostView;
+}) {
+  const summary = view.summary;
 
   return (
     <Card className="border-primary/30">

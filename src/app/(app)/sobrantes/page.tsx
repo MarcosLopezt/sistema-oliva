@@ -35,8 +35,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LeftoverDialog } from "@/components/sobrantes/leftover-dialog";
+import { ArchiveDialog } from "@/components/archivado/archive-dialog";
+import { ArchivedPanel } from "@/components/archivado/archived-panel";
+import {
+  ArchiveTabs,
+  BulkActionBar,
+  RowCheckbox,
+  SelectAllCheckbox,
+} from "@/components/archivado/bulk-bar";
+import { useBulkSelection } from "@/components/archivado/use-bulk-selection";
+import { toRow } from "@/lib/archivado";
 import {
   ExpiryBadge,
   StatusBadge,
@@ -45,8 +54,9 @@ import {
 import {
   useLeftovers,
   useUpdateLeftover,
-  useDeleteLeftover,
+  useArchivedLeftovers,
 } from "@/lib/hooks";
+import { toastUndo } from "@/lib/undo";
 import { formatDate, formatNum, unitLabel } from "@/lib/format";
 import {
   calibrationByProduct,
@@ -72,9 +82,11 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
 
 export default function SobrantesPage() {
   const { data: leftovers, isLoading } = useLeftovers();
+  const { data: archived, isLoading: loadingArchived } = useArchivedLeftovers();
   const update = useUpdateLeftover();
-  const del = useDeleteLeftover();
 
+  const [tab, setTab] = useState<"vigentes" | "archivados">("vigentes");
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("activos");
   const [providerFilter, setProviderFilter] = useState("todos");
   const [search, setSearch] = useState("");
@@ -82,7 +94,6 @@ export default function SobrantesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LeftoverWithProduct | null>(null);
   const [discarding, setDiscarding] = useState<LeftoverWithProduct | null>(null);
-  const [toDelete, setToDelete] = useState<LeftoverWithProduct | null>(null);
 
   const today = todayISO();
   const all = useMemo(() => leftovers ?? [], [leftovers]);
@@ -121,6 +132,11 @@ export default function SobrantesPage() {
     });
   }, [withStatus, statusFilter, providerFilter, search]);
 
+  // La selección se calcula sobre lo filtrado, así que "seleccionar todos"
+  // toma solo lo que coincide con estado, proveedor y búsqueda.
+  const visibleRows = useMemo(() => filtered.map(({ l }) => l), [filtered]);
+  const sel = useBulkSelection(visibleRows);
+
   // Agrupado por proveedor, que es como se sale a buscar la mercadería.
   const groups = useMemo(() => {
     const m = new Map<
@@ -157,7 +173,14 @@ export default function SobrantesPage() {
 
   const calibration = useMemo(() => calibrationByProduct(all), [all]);
 
+  /**
+   * Marcar consumido es reversible, así que no pide confirmación: se aplica y
+   * se ofrece deshacer. OJO — también pone el stock en cero, así que deshacer
+   * tiene que restituir la cantidad además del estado. Por eso se capturan los
+   * DOS valores previos antes de mutar.
+   */
   async function setStatus(l: LeftoverWithProduct, status: LeftoverStatus) {
+    const previous = { status: l.status, qty_remaining: l.qty_remaining };
     try {
       await update.mutateAsync({
         id: l.id,
@@ -168,24 +191,22 @@ export default function SobrantesPage() {
               { status, qty_remaining: 0 }
             : { status },
       });
-      toast.success(
-        status === "consumido" ? "Marcado como consumido." : "Marcado como descartado.",
-      );
+      toastUndo({
+        message:
+          status === "consumido"
+            ? "Marcado como consumido."
+            : "Marcado como descartado.",
+        description: l.product?.name ?? undefined,
+        onUndo: () =>
+          update.mutateAsync({
+            id: l.id,
+            eventId: l.origin_event_id,
+            input: previous,
+          }),
+        undoneMessage: "El sobrante volvió a estar disponible.",
+      });
     } catch (e) {
       toast.error("No se pudo actualizar", {
-        description: e instanceof Error ? e.message : undefined,
-      });
-    }
-  }
-
-  async function confirmDelete() {
-    if (!toDelete) return;
-    try {
-      await del.mutateAsync({ id: toDelete.id, eventId: toDelete.origin_event_id });
-      toast.success("Sobrante eliminado.");
-      setToDelete(null);
-    } catch (e) {
-      toast.error("No se pudo eliminar", {
         description: e instanceof Error ? e.message : undefined,
       });
     }
@@ -238,6 +259,26 @@ export default function SobrantesPage() {
         </Card>
       )}
 
+      <div className="mb-4">
+        <ArchiveTabs
+          value={tab}
+          onChange={setTab}
+          archivedCount={archived?.length}
+        />
+      </div>
+
+      {tab === "archivados" ? (
+        <ArchivedPanel
+          entity="leftovers"
+          isLoading={loadingArchived}
+          rows={(archived ?? []).map((l) => ({
+            ...toRow.leftover(l),
+            archived_at: l.archived_at,
+            detail: l.origin_event_name ?? "carga manual",
+          }))}
+        />
+      ) : (
+        <>
       {/* Filtros */}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
@@ -317,6 +358,13 @@ export default function SobrantesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-px">
+                    <SelectAllCheckbox
+                      checked={sel.allVisibleSelected}
+                      indeterminate={sel.someVisibleSelected}
+                      onToggle={sel.toggleAll}
+                    />
+                  </TableHead>
                   <TableHead>Producto</TableHead>
                   <TableHead className="text-right">Restante</TableHead>
                   <TableHead>Origen</TableHead>
@@ -328,6 +376,13 @@ export default function SobrantesPage() {
               <TableBody>
                 {g.rows.map(({ l, status }) => (
                   <TableRow key={l.id} className={rowTone(l.expires_at, status)}>
+                    <TableCell>
+                      <RowCheckbox
+                        checked={sel.isSelected(l.id)}
+                        onToggle={() => sel.toggle(l.id)}
+                        label={l.product?.name ?? "sobrante"}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">
                       <div className="max-w-[240px] truncate">
                         {l.product?.name ?? "—"}
@@ -393,7 +448,11 @@ export default function SobrantesPage() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => setToDelete(l)}
+                          onClick={() => {
+                            sel.clear();
+                            sel.toggle(l.id);
+                            setArchiveOpen(true);
+                          }}
                           aria-label="Eliminar"
                         >
                           <Trash2 className="size-4 text-destructive" />
@@ -408,7 +467,16 @@ export default function SobrantesPage() {
         ))}
       </div>
 
+      <BulkActionBar
+        count={sel.count}
+        noun={{ singular: "sobrante", plural: "sobrantes" }}
+        onClear={sel.clear}
+        onArchive={() => setArchiveOpen(true)}
+      />
+
       {calibration.length > 0 && <CalibrationCard rows={calibration} />}
+        </>
+      )}
 
       <LeftoverDialog
         open={dialogOpen}
@@ -423,13 +491,12 @@ export default function SobrantesPage() {
         onOpenChange={(o) => !o && setDiscarding(null)}
         onDone={() => setDiscarding(null)}
       />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Eliminar sobrante"
-        description={`Se borra el registro de "${toDelete?.product?.name ?? ""}". Si en realidad se consumió o se tiró, mejor marcalo como consumido o descartado: así queda el historial.`}
-        onConfirm={confirmDelete}
-        loading={del.isPending}
+      <ArchiveDialog
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        entity="leftovers"
+        rows={sel.selected.map(toRow.leftover)}
+        onDone={sel.clear}
       />
     </div>
   );

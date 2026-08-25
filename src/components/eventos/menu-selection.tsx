@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RecipePickerDialog } from "@/components/eventos/recipe-picker-dialog";
 import { useAddEventRecipe, useRemoveEventRecipe } from "@/lib/hooks";
+import { useEventLocked } from "@/components/eventos/event-lock";
 import { selectionUnits } from "@/lib/materia-prima";
 import { formatNum } from "@/lib/format";
 import type {
@@ -31,6 +32,7 @@ export function MenuSelection({
 }) {
   const add = useAddEventRecipe();
   const remove = useRemoveEventRecipe();
+  const locked = useEventLocked();
   const [pickerRole, setPickerRole] = useState<EventRecipeRole | null>(null);
 
   const unitsById = new Map(
@@ -74,14 +76,16 @@ export function MenuSelection({
                     {hint}
                   </span>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPickerRole(role)}
-                >
-                  <Plus className="size-4" />
-                  Agregar
-                </Button>
+                {!locked && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPickerRole(role)}
+                  >
+                    <Plus className="size-4" />
+                    Agregar
+                  </Button>
+                )}
               </div>
 
               {items.length === 0 ? (
@@ -97,13 +101,15 @@ export function MenuSelection({
                       <span className="text-xs text-muted-foreground">
                         {formatNum(unitsById.get(s.id) ?? 0)} u
                       </span>
-                      <button
-                        onClick={() => handleRemove(s.id)}
-                        className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-destructive"
-                        aria-label="Quitar"
-                      >
-                        <X className="size-3.5" />
-                      </button>
+                      {!locked && (
+                        <button
+                          onClick={() => handleRemove(s.id)}
+                          className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-destructive"
+                          aria-label="Quitar"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
