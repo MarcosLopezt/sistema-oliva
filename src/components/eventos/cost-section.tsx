@@ -16,6 +16,7 @@ import {
 import { CostLineDialog } from "@/components/eventos/cost-line-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useDeleteEventCost } from "@/lib/hooks";
+import { useEventLocked } from "@/components/eventos/event-lock";
 import { formatARS, formatNum } from "@/lib/format";
 import { COST_SECTIONS, type EventCost, type EventCostSection } from "@/lib/types";
 
@@ -30,6 +31,7 @@ export function CostSection({
 }) {
   const cfg = COST_SECTIONS[section];
   const del = useDeleteEventCost();
+  const locked = useEventLocked();
   const lines = costs.filter((c) => c.section === section);
   const subtotal = lines.reduce((s, c) => s + c.quantity * c.unit_price, 0);
 
@@ -63,17 +65,19 @@ export function CostSection({
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium">{formatARS(subtotal)}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setDialogOpen(true);
-            }}
-          >
-            <Plus className="size-4" />
-            Agregar
-          </Button>
+          {!locked && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="size-4" />
+              Agregar
+            </Button>
+          )}
         </div>
       </div>
 
@@ -112,25 +116,29 @@ export function CostSection({
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setEditing(c);
-                        setDialogOpen(true);
-                      }}
-                      aria-label="Editar"
-                    >
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setToDelete(c)}
-                      aria-label="Eliminar"
-                    >
-                      <Trash2 className="size-4 text-destructive" />
-                    </Button>
+                    {!locked && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => {
+                            setEditing(c);
+                            setDialogOpen(true);
+                          }}
+                          aria-label="Editar"
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setToDelete(c)}
+                          aria-label="Eliminar"
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

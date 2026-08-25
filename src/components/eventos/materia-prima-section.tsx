@@ -14,9 +14,9 @@ import {
 } from "@/components/ui/table";
 import { ProviderOrderDialog } from "@/components/eventos/provider-order-dialog";
 import {
-  computeMateriaPrima,
   buildProviderOrderMessage,
   isSurplusSignificant,
+  type MateriaPrimaResult,
   type MPGroup,
   type MPLine,
   type IvaBreakdown,
@@ -29,25 +29,29 @@ import {
   productsByIngredient,
   usableByProduct,
 } from "@/lib/sobrantes";
-import type {
-  EventRow,
-  EventRecipeWithRecipe,
-  IngredientWithProduct,
-  LeftoverWithProduct,
+import {
+  isEventLive,
+  type EventRow,
+  type EventRecipeWithRecipe,
+  type IngredientWithProduct,
+  type LeftoverWithProduct,
 } from "@/lib/types";
 
+/**
+ * `mp` viene calculado de afuera: del catálogo vivo si el evento está abierto,
+ * o de la foto del cierre si está finalizado. Esta sección no distingue una
+ * cosa de la otra, que es lo que garantiza que un evento cerrado muestre
+ * exactamente los números con los que se cerró.
+ */
 export function MateriaPrimaSection({
   event,
   selections,
+  mp,
 }: {
   event: EventRow;
   selections: EventRecipeWithRecipe[];
+  mp: MateriaPrimaResult | null;
 }) {
-  const mp = useMemo(
-    () => computeMateriaPrima(event, selections),
-    [event, selections],
-  );
-
   const ingredientsById = useMemo(() => {
     const map = new Map<string, IngredientWithProduct>();
     for (const sel of selections) {
@@ -63,7 +67,13 @@ export function MateriaPrimaSection({
     [ingredientsById],
   );
 
-  const failed = useMarketPriceUpdater(event.id, autoIngredients);
+  // Solo mientras el evento está abierto: buscar precios ESCRIBE en la base, y
+  // sobre un evento finalizado eso le movía el costo a algo ya cerrado.
+  const failed = useMarketPriceUpdater(
+    event.id,
+    autoIngredients,
+    isEventLive(event),
+  );
 
   const [orderGroup, setOrderGroup] = useState<MPGroup | null>(null);
 
@@ -92,11 +102,21 @@ export function MateriaPrimaSection({
   // Líneas con sobrante significativo (solo modelo tres capas).
   const surplusLines = useMemo(
     () =>
-      mp.groups
+      (mp?.groups ?? [])
         .flatMap((g) => g.lines)
         .filter(isSurplusSignificant),
-    [mp.groups],
+    [mp],
   );
+
+  if (!mp) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Calculando…
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (selections.length === 0) {
     return (

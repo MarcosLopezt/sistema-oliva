@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useCreateLeftovers, useEventLeftovers } from "@/lib/hooks";
-import { computeMateriaPrima } from "@/lib/materia-prima";
+import type { MateriaPrimaResult } from "@/lib/materia-prima";
 import { formatDate, unitLabel } from "@/lib/format";
 import {
   buildLeftoverDrafts,
@@ -48,19 +48,28 @@ export function LeftoverCloseDialog({
   onOpenChange,
   event,
   selections,
+  mp,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   event: EventRow;
   selections: EventRecipeWithRecipe[];
+  /**
+   * El cálculo de materia prima que ya hizo la página — el MISMO que quedó
+   * guardado en la foto al finalizar. Antes este diálogo lo recalculaba por su
+   * cuenta, así que si un precio cambiaba entre el cierre y este paso, los
+   * sobrantes salían de una base distinta de la que registró el costo.
+   */
+  mp: MateriaPrimaResult | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
-        {open && (
+        {open && mp && (
           <CloseForm
             event={event}
             selections={selections}
+            mp={mp}
             onDone={() => onOpenChange(false)}
           />
         )}
@@ -81,19 +90,21 @@ type Row = {
 function CloseForm({
   event,
   selections,
+  mp,
   onDone,
 }: {
   event: EventRow;
   selections: EventRecipeWithRecipe[];
+  mp: MateriaPrimaResult;
   onDone: () => void;
 }) {
   const create = useCreateLeftovers();
   const { data: alreadySaved } = useEventLeftovers(event.id);
 
-  const drafts = useMemo(() => {
-    const mp = computeMateriaPrima(event, selections);
-    return buildLeftoverDrafts(event, mp, productsByIngredient(selections));
-  }, [event, selections]);
+  const drafts = useMemo(
+    () => buildLeftoverDrafts(event, mp, productsByIngredient(selections)),
+    [event, mp, selections],
+  );
 
   // Productos ya registrados en un cierre anterior: no se vuelven a ofrecer.
   const savedProductIds = useMemo(

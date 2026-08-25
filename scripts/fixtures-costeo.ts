@@ -34,6 +34,8 @@ function product(
     leftover_shelf_life_days: null,
     updated_at: "2026-01-01T00:00:00Z",
     created_at: "2026-01-01T00:00:00Z",
+    active: true,
+    archived_at: null,
     ...over,
     provider: PROVIDER,
   } as FixtureProduct;
@@ -57,6 +59,8 @@ function ingredient(
     market_price_source: null,
     notes: null,
     created_at: "2026-01-01T00:00:00Z",
+    active: true,
+    archived_at: null,
     product: prod,
   };
 }
@@ -102,6 +106,8 @@ function selection(
       description: null,
       notes: null,
       created_at: "2026-01-01T00:00:00Z",
+      active: true,
+      archived_at: null,
       items,
     },
   };

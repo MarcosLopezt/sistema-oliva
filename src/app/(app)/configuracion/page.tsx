@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, RefreshCw } from "lucide-react";
+import { Plus, Pencil, Archive, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,13 +14,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { NativeSelect } from "@/components/native-select";
 import { BarSettingsCard } from "@/components/configuracion/bar-settings-card";
+import { BackfillCostosCard } from "@/components/configuracion/backfill-costos-card";
 import { BeverageDialog } from "@/components/configuracion/beverage-dialog";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ArchiveDialog } from "@/components/archivado/archive-dialog";
+import { ArchivedPanel } from "@/components/archivado/archived-panel";
+import {
+  ArchiveTabs,
+  BulkActionBar,
+  RowCheckbox,
+  SelectAllCheckbox,
+} from "@/components/archivado/bulk-bar";
+import { useBulkSelection } from "@/components/archivado/use-bulk-selection";
+import { toRow } from "@/lib/archivado";
 import {
   useBarSettings,
   useBarBeverages,
-  useDeleteBarBeverage,
+  useArchivedBarBeverages,
   useUpdateBarBeverage,
   useBeverageMarketPriceUpdater,
 } from "@/lib/hooks";
@@ -31,16 +42,36 @@ import type { BarBeverage } from "@/lib/types";
 export default function ConfiguracionPage() {
   const { data: settings, isLoading } = useBarSettings();
   const { data: beverages } = useBarBeverages();
-  const del = useDeleteBarBeverage();
+  const { data: archivedBev, isLoading: loadingArchivedBev } =
+    useArchivedBarBeverages();
   const updateBev = useUpdateBarBeverage();
   // Actualiza en background el precio de las bebidas con búsqueda automática
   // (al activar el flag acá mismo se refresca el precio sin abrir un evento).
-  const failed = useBeverageMarketPriceUpdater(beverages ?? []);
+  //
+  // Acá va habilitado a propósito: esta ES la pantalla de mantenimiento del
+  // catálogo, y actualizar precios es lo que se viene a hacer. En las pantallas
+  // de evento, en cambio, va atado a `isEventLive`.
+  // Ya no hay fuga hacia atrás: desde 0019 los eventos finalizados leen su
+  // foto de costo, así que un precio nuevo acá no les mueve la barra.
+  const failed = useBeverageMarketPriceUpdater(beverages ?? [], true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<BarBeverage | null>(null);
-  const [toDelete, setToDelete] = useState<BarBeverage | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [bevTab, setBevTab] = useState<"vigentes" | "archivados">("vigentes");
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [serviceFilter, setServiceFilter] = useState("todos");
+
+  const allBev = useMemo(() => beverages ?? [], [beverages]);
+  const filteredBev = useMemo(
+    () =>
+      serviceFilter === "todos"
+        ? allBev
+        : allBev.filter((b) => b.service === serviceFilter),
+    [allBev, serviceFilter],
+  );
+  // Sobre `filteredBev`: seleccionar todos respeta el filtro de servicio.
+  const selBev = useBulkSelection(filteredBev);
 
   // Fuerza la re-búsqueda del precio de mercado de todas las bebidas auto
   // (ignora el vencimiento de 7 días; respeta las de precio manual).
@@ -79,19 +110,6 @@ export default function ConfiguracionPage() {
     toast.success(`Precios actualizados: ${ok}.` + (fail ? ` Sin resultado: ${fail}.` : ""));
   }
 
-  async function confirmDelete() {
-    if (!toDelete) return;
-    try {
-      await del.mutateAsync(toDelete.id);
-      toast.success("Bebida eliminada.");
-      setToDelete(null);
-    } catch (e) {
-      toast.error("No se pudo eliminar", {
-        description: e instanceof Error ? e.message : undefined,
-      });
-    }
-  }
-
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8">
       <div>
@@ -106,6 +124,8 @@ export default function ConfiguracionPage() {
       ) : (
         <BarSettingsCard settings={settings} />
       )}
+
+      <BackfillCostosCard />
 
       <section>
         <div className="mb-3 flex items-end justify-between gap-4">
@@ -140,15 +160,55 @@ export default function ConfiguracionPage() {
           </div>
         </div>
 
-        {!beverages || beverages.length === 0 ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <ArchiveTabs
+            value={bevTab}
+            onChange={setBevTab}
+            archivedCount={archivedBev?.length}
+          />
+          {bevTab === "vigentes" && (
+            <NativeSelect
+              value={serviceFilter}
+              onChange={(e) => setServiceFilter(e.target.value)}
+              className="w-48"
+            >
+              <option value="todos">Todos los servicios</option>
+              <option value="sin_alcohol">Sin alcohol</option>
+              <option value="con_alcohol">Con alcohol</option>
+              <option value="ambos">Ambos</option>
+            </NativeSelect>
+          )}
+        </div>
+
+        {bevTab === "archivados" ? (
+          <ArchivedPanel
+            entity="bar_beverages"
+            isLoading={loadingArchivedBev}
+            rows={(archivedBev ?? []).map((b) => ({
+              ...toRow.beverage(b),
+              archived_at: b.archived_at,
+              detail: `${formatNum(b.size_ml)} ml`,
+            }))}
+          />
+        ) : filteredBev.length === 0 ? (
           <Card className="p-8 text-center text-sm text-muted-foreground">
-            Sin bebidas cargadas.
+            {allBev.length === 0
+              ? "Sin bebidas cargadas."
+              : "Ninguna bebida coincide con el filtro."}
           </Card>
         ) : (
+          <>
           <Card className="overflow-hidden p-0">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-px">
+                    <SelectAllCheckbox
+                      checked={selBev.allVisibleSelected}
+                      indeterminate={selBev.someVisibleSelected}
+                      onToggle={selBev.toggleAll}
+                    />
+                  </TableHead>
                   <TableHead>Bebida</TableHead>
                   <TableHead>Servicio</TableHead>
                   <TableHead className="text-right">Botella</TableHead>
@@ -158,8 +218,15 @@ export default function ConfiguracionPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {beverages.map((b) => (
+                {filteredBev.map((b) => (
                   <TableRow key={b.id}>
+                    <TableCell>
+                      <RowCheckbox
+                        checked={selBev.isSelected(b.id)}
+                        onToggle={() => selBev.toggle(b.id)}
+                        label={b.name}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{b.name}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">
@@ -218,10 +285,14 @@ export default function ConfiguracionPage() {
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          onClick={() => setToDelete(b)}
+                          onClick={() => {
+                            selBev.clear();
+                            selBev.toggle(b.id);
+                            setArchiveOpen(true);
+                          }}
                           aria-label="Eliminar"
                         >
-                          <Trash2 className="size-4 text-destructive" />
+                          <Archive className="size-4 text-destructive" />
                         </Button>
                       </div>
                     </TableCell>
@@ -230,6 +301,14 @@ export default function ConfiguracionPage() {
               </TableBody>
             </Table>
           </Card>
+
+          <BulkActionBar
+            count={selBev.count}
+            noun={{ singular: "bebida", plural: "bebidas" }}
+            onClear={selBev.clear}
+            onArchive={() => setArchiveOpen(true)}
+          />
+          </>
         )}
       </section>
 
@@ -238,13 +317,12 @@ export default function ConfiguracionPage() {
         onOpenChange={setDialogOpen}
         beverage={editing}
       />
-      <ConfirmDialog
-        open={!!toDelete}
-        onOpenChange={(o) => !o && setToDelete(null)}
-        title="Eliminar bebida"
-        description={`Se eliminará "${toDelete?.name}".`}
-        onConfirm={confirmDelete}
-        loading={del.isPending}
+      <ArchiveDialog
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        entity="bar_beverages"
+        rows={selBev.selected.map(toRow.beverage)}
+        onDone={selBev.clear}
       />
     </div>
   );

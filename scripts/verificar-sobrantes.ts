@@ -187,6 +187,8 @@ console.log("\n5) CALIBRACIÓN — calculado vs confirmado");
     note: null,
     created_at: "",
     updated_at: "",
+    active: true,
+    archived_at: null,
     product: null,
   };
 

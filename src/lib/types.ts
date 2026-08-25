@@ -24,6 +24,24 @@ export function unitDimension(u: UnitKind): "mass" | "volume" | "count" {
   return "count";
 }
 
+/**
+ * Campos de archivado (migración 0020), comunes a las cinco entidades que
+ * se archivan en vez de borrarse: ingredientes, recetas, productos, bebidas
+ * y sobrantes.
+ *
+ * Mismo mecanismo que ya usan `staff` y `staff_roles` desde 0007/0018, para
+ * no tener dos formas distintas de decir lo mismo en el mismo sistema.
+ */
+export type Archivable = {
+  /**
+   * false = archivado. Desaparece de listados y selectores, pero la fila
+   * sigue existiendo y lo que ya la referenciaba la sigue usando.
+   */
+  active: boolean;
+  /** Cuándo se archivó. Lo mantiene un trigger a partir de `active`. */
+  archived_at: string | null;
+};
+
 export type Provider = {
   id: string;
   name: string;
@@ -75,7 +93,7 @@ export type Product = {
   leftover_shelf_life_days: number | null;
   updated_at: string;
   created_at: string;
-};
+} & Archivable;
 
 export type Ingredient = {
   id: string;
@@ -92,7 +110,7 @@ export type Ingredient = {
   market_price_source: "auto" | "manual" | null;
   notes: string | null;
   created_at: string;
-};
+} & Archivable;
 
 /** Ingrediente con su producto vinculado embebido (join). */
 export type IngredientWithProduct = Ingredient & {
@@ -168,7 +186,7 @@ export type Recipe = {
   description: string | null;
   notes: string | null;
   created_at: string;
-};
+} & Archivable;
 
 export type RecipeItem = {
   id: string;
@@ -229,6 +247,17 @@ export type ImportRecipePlan = {
 // -------------------------------- Eventos --------------------------------
 
 export type EventStatus = "activo" | "finalizado";
+
+/**
+ * true = el evento sigue en planificación y sus números se recalculan con el
+ * catálogo vivo. false = está cerrado y sus números son historia contable.
+ *
+ * Nada que escriba en la base por el solo hecho de abrir la pantalla puede
+ * correr sobre un evento cerrado. Ver `useMarketPriceUpdater`.
+ */
+export function isEventLive(event: { status: EventStatus }): boolean {
+  return event.status === "activo";
+}
 
 export type EventRecipeRole =
   | "bocado"
@@ -331,7 +360,7 @@ export type BarBeverage = {
   market_price_updated_at: string | null;
   sort_order: number;
   created_at: string;
-};
+} & Archivable;
 
 export type BarBeverageInput = {
   name: string;
@@ -463,12 +492,40 @@ export function staffCategoryLabel(value: string): string {
   return STAFF_CATEGORIES.find((c) => c.value === value)?.label ?? value;
 }
 
+/**
+ * Rol dentro de una categoría (Chef, Mozo, Bachero…). Su tarifa es el
+ * NIVEL 1 de la jerarquía: el valor por defecto que heredan los empleados
+ * que no tienen tarifa propia.
+ */
+export type StaffRole = {
+  id: string;
+  name: string;
+  category: StaffCategory;
+  hourly_rate: number;
+  active: boolean;
+  created_at: string;
+};
+
+export type StaffRoleInput = {
+  name: string;
+  category: StaffCategory;
+  hourly_rate: number;
+  active?: boolean;
+};
+
 export type Staff = {
   id: string;
   full_name: string;
   category: StaffCategory;
+  /**
+   * Texto libre previo a los roles. Se conserva como respaldo histórico de
+   * la migración 0018; la UI usa role_id. No mostrar en pantallas nuevas.
+   */
   role: string | null;
-  hourly_rate: number;
+  /** Rol habitual del empleado (null = sin rol asignado todavía). */
+  role_id: string | null;
+  /** NIVEL 2: tarifa propia. null = hereda la del rol. */
+  hourly_rate: number | null;
   active: boolean;
   created_at: string;
 };
@@ -476,9 +533,14 @@ export type Staff = {
 export type StaffInput = {
   full_name: string;
   category: StaffCategory;
-  role?: string | null;
-  hourly_rate: number;
+  role_id?: string | null;
+  hourly_rate: number | null;
   active?: boolean;
+};
+
+/** Empleado con su rol habitual embebido (join). */
+export type StaffWithRole = Staff & {
+  staff_role: StaffRole | null;
 };
 
 /** Empleado asignado a un evento (horas + tarifa puntual + estado de pago). */
@@ -487,8 +549,10 @@ export type EventStaff = {
   event_id: string;
   staff_id: string;
   hours: number;
-  /** Tarifa puntual para este evento (null = usar staff.hourly_rate). */
+  /** NIVEL 3: tarifa puntual para este evento (null = resolver por jerarquía). */
   rate_override: number | null;
+  /** Rol puntual para este evento (null = usar el rol habitual del empleado). */
+  role_id: string | null;
   paid: boolean;
   created_at: string;
 };
@@ -497,17 +561,21 @@ export type EventStaffInput = {
   staff_id: string;
   hours: number;
   rate_override?: number | null;
+  role_id?: string | null;
   paid?: boolean;
 };
 
-/** Asignación con el empleado embebido (join). */
+/** Asignación con el empleado y el rol del evento embebidos (join). */
 export type EventStaffWithStaff = EventStaff & {
-  staff: Staff | null;
+  staff: StaffWithRole | null;
+  /** Rol puntual del evento, ya resuelto (null = manda el habitual). */
+  event_role: StaffRole | null;
 };
 
 /** Asignación con el empleado y el evento embebidos (para la vista de Pagos). */
 export type EventStaffWithEvent = EventStaff & {
-  staff: Staff | null;
+  staff: StaffWithRole | null;
+  event_role: StaffRole | null;
   event: Pick<EventRow, "id" | "name" | "event_date"> | null;
 };
 
@@ -670,7 +738,7 @@ export type Leftover = {
   note: string | null;
   created_at: string;
   updated_at: string;
-};
+} & Archivable;
 
 /** Sobrante con producto y proveedor embebidos (join para el listado). */
 export type LeftoverWithProduct = Leftover & {

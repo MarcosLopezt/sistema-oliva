@@ -15,36 +15,60 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  useBarSettings,
   useBarBeverages,
   useUpdateEvent,
   useBeverageMarketPriceUpdater,
 } from "@/lib/hooks";
-import { computeBarra } from "@/lib/barra";
+import type { BarraResult } from "@/lib/barra";
+import { useEventLocked } from "@/components/eventos/event-lock";
 import { beverageMarketLabel } from "@/lib/market-price";
 import { formatARS, formatNum } from "@/lib/format";
 import {
   BARRA_SERVICES,
   BARRA_DIAS,
   BARRA_HORARIOS,
+  isEventLive,
   type EventRow,
   type BarraService,
   type BarraDia,
   type BarraHorario,
 } from "@/lib/types";
 
-export function BarraSection({ event }: { event: EventRow }) {
-  const { data: settings } = useBarSettings();
+/** Mientras el cálculo no llegó todavía. */
+const EMPTY_BARRA: BarraResult = {
+  lines: [],
+  total: 0,
+  perPerson: 0,
+  factorDia: 1,
+  factorHorario: 1,
+};
+
+/**
+ * `barra` viene calculada de afuera: del catálogo vivo si el evento está
+ * abierto, o de la foto del cierre si está finalizado. Es el caso donde más
+ * importa: `bar_beverages` es un catálogo global sin tabla por evento, así que
+ * antes de la foto, tocar una bebida le movía la barra a todos los eventos.
+ */
+export function BarraSection({
+  event,
+  barra,
+}: {
+  event: EventRow;
+  barra: BarraResult | null;
+}) {
   const { data: beverages } = useBarBeverages();
   const update = useUpdateEvent();
+  const locked = useEventLocked();
 
-  const result = useMemo(
-    () => computeBarra(event, settings, beverages ?? []),
-    [event, settings, beverages],
-  );
+  const result = barra ?? EMPTY_BARRA;
 
   // Actualiza en background el precio de las bebidas con búsqueda automática.
-  const failed = useBeverageMarketPriceUpdater(beverages ?? []);
+  // Solo con el evento abierto: `bar_beverages` es un catálogo global, así que
+  // un precio nuevo se aplicaba también a la barra de los eventos finalizados.
+  const failed = useBeverageMarketPriceUpdater(
+    beverages ?? [],
+    isEventLive(event),
+  );
   const beveragesById = useMemo(() => {
     const map = new Map((beverages ?? []).map((b) => [b.id, b]));
     return map;
@@ -70,6 +94,7 @@ export function BarraSection({ event }: { event: EventRow }) {
             <Label>Servicio</Label>
             <NativeSelect
               value={event.barra_service}
+              disabled={locked}
               onChange={(e) =>
                 patch({ barra_service: e.target.value as BarraService })
               }
@@ -85,7 +110,7 @@ export function BarraSection({ event }: { event: EventRow }) {
             <Label>Día</Label>
             <NativeSelect
               value={event.barra_dia}
-              disabled={!showList}
+              disabled={locked || !showList}
               onChange={(e) =>
                 patch({ barra_dia: e.target.value as BarraDia })
               }
@@ -101,7 +126,7 @@ export function BarraSection({ event }: { event: EventRow }) {
             <Label>Horario</Label>
             <NativeSelect
               value={event.barra_horario}
-              disabled={!showList}
+              disabled={locked || !showList}
               onChange={(e) =>
                 patch({ barra_horario: e.target.value as BarraHorario })
               }

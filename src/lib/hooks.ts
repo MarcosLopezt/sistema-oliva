@@ -31,12 +31,15 @@ import type {
   BarBeverageInput,
   EventCostInput,
   StaffInput,
+  StaffRoleInput,
   EventStaffInput,
   TablewareProviderInput,
   TablewareItemInput,
   EventTablewareInput,
   LeftoverInput,
 } from "@/lib/types";
+import type { EventCostSnapshotData, SnapshotOrigin } from "@/lib/snapshot";
+import { buildDependencyGraph, type ArchivableEntity } from "@/lib/archivado";
 
 export const keys = {
   providers: ["providers"] as const,
@@ -53,6 +56,7 @@ export const keys = {
   barBeverages: ["bar_beverages"] as const,
   eventCosts: (id: string) => ["events", id, "costs"] as const,
   staff: ["staff"] as const,
+  staffRoles: ["staff_roles"] as const,
   eventStaff: (id: string) => ["events", id, "staff"] as const,
   staffPayments: ["staff", "payments"] as const,
   tablewareProviders: ["tableware_providers"] as const,
@@ -64,6 +68,13 @@ export const keys = {
   eventTableware: (id: string) => ["events", id, "tableware"] as const,
   leftovers: ["leftovers"] as const,
   eventLeftovers: (id: string) => ["events", id, "leftovers"] as const,
+  eventSnapshot: (id: string) => ["events", id, "snapshot"] as const,
+  snapshottedEvents: ["event_cost_snapshots"] as const,
+  archived: (entity: ArchivableEntity) => ["archived", entity] as const,
+  referenceCounts: ["reference_counts"] as const,
+  eventRecipeLinks: ["event_recipe_links"] as const,
+  recipeIngredientLinks: ["recipe_ingredient_links"] as const,
+  ingredientProductLinks: ["ingredient_product_links"] as const,
 };
 
 // ----------------------------- Proveedores -----------------------------
@@ -450,6 +461,39 @@ export function useDeleteEventCost() {
   });
 }
 
+// ---------------------------- Roles de personal ----------------------------
+
+export function useStaffRoles() {
+  return useQuery({ queryKey: keys.staffRoles, queryFn: q.listStaffRoles });
+}
+
+/**
+ * Tocar un rol puede cambiar la tarifa heredada de cualquier empleado y de
+ * cualquier evento, así que se invalidan también esas vistas.
+ */
+function invalidateRoleViews(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: keys.staffRoles });
+  qc.invalidateQueries({ queryKey: keys.staff });
+  qc.invalidateQueries({ queryKey: keys.events });
+}
+
+export function useCreateStaffRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: StaffRoleInput) => q.createStaffRole(input),
+    onSuccess: () => invalidateRoleViews(qc),
+  });
+}
+
+export function useUpdateStaffRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Partial<StaffRoleInput> }) =>
+      q.updateStaffRole(id, input),
+    onSuccess: () => invalidateRoleViews(qc),
+  });
+}
+
 // ------------------------------- Personal -------------------------------
 
 export function useStaff() {
@@ -472,6 +516,8 @@ export function useUpdateStaff() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.staff });
       qc.invalidateQueries({ queryKey: keys.staffPayments });
+      // Cambiarle el rol o la tarifa mueve lo que se ve en cada evento.
+      qc.invalidateQueries({ queryKey: keys.events });
     },
   });
 }
@@ -499,6 +545,21 @@ export function useAddEventStaff() {
   });
 }
 
+/** Agrega varios empleados al evento en una sola operación. */
+export function useAddEventStaffBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      eventId,
+      inputs,
+    }: {
+      eventId: string;
+      inputs: EventStaffInput[];
+    }) => q.addEventStaffBulk(eventId, inputs),
+    onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
+  });
+}
+
 export function useUpdateEventStaff() {
   const qc = useQueryClient();
   return useMutation({
@@ -519,6 +580,16 @@ export function useRemoveEventStaff() {
   return useMutation({
     mutationFn: ({ id }: { id: string; eventId: string }) =>
       q.removeEventStaff(id),
+    onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
+  });
+}
+
+/** Quita varias asignaciones del evento en una sola operación. */
+export function useRemoveEventStaffBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids }: { ids: string[]; eventId: string }) =>
+      q.removeEventStaffBulk(ids),
     onSuccess: (_d, vars) => invalidateStaffViews(qc, vars.eventId),
   });
 }
@@ -772,16 +843,24 @@ export function useDeleteLeftover() {
  * Busca en background el precio de mercado de los ingredientes "sin proveedor
  * fijo" (market_auto) que estén vencidos, y los actualiza. No bloquea la carga
  * del evento. Devuelve el set de ids cuya búsqueda falló (para avisar al usuario).
+ *
+ * `enabled` NO es opcional a propósito: este hook ESCRIBE en la base como
+ * efecto de abrir una pantalla. Sobre un evento finalizado eso le cambiaba el
+ * costo a un evento cerrado sin que nadie hiciera nada — mirarlo alcanzaba.
+ * Que el parámetro sea obligatorio obliga a cada llamador a decidir.
+ * Ver `isEventLive`.
  */
 export function useMarketPriceUpdater(
   eventId: string,
   ingredients: IngredientWithProduct[],
+  enabled: boolean,
 ): Set<string> {
   const qc = useQueryClient();
   const [failed, setFailed] = useState<Set<string>>(new Set());
   const attempted = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    if (!enabled) return;
     const stale = ingredients.filter(isStaleAuto);
     if (stale.length === 0) return;
     let cancelled = false;
@@ -818,7 +897,7 @@ export function useMarketPriceUpdater(
     return () => {
       cancelled = true;
     };
-  }, [ingredients, eventId, qc]);
+  }, [ingredients, eventId, enabled, qc]);
 
   return failed;
 }
@@ -827,15 +906,22 @@ export function useMarketPriceUpdater(
  * Igual que useMarketPriceUpdater pero para las bebidas de la barra: busca en
  * background el precio de las bebidas con market_auto vencidas y actualiza su
  * columna `price`. Devuelve el set de ids cuya búsqueda falló.
+ *
+ * `enabled` es obligatorio por el mismo motivo, y acá el daño era MAYOR:
+ * `bar_beverages` es un catálogo global sin tabla por evento, así que un
+ * precio nuevo se aplica a la barra de TODOS los eventos, incluidos los
+ * finalizados. Ver `isEventLive`.
  */
 export function useBeverageMarketPriceUpdater(
   beverages: BarBeverage[],
+  enabled: boolean,
 ): Set<string> {
   const qc = useQueryClient();
   const [failed, setFailed] = useState<Set<string>>(new Set());
   const attempted = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    if (!enabled) return;
     const stale = beverages.filter(isStaleAutoBeverage);
     if (stale.length === 0) return;
     let cancelled = false;
@@ -871,7 +957,192 @@ export function useBeverageMarketPriceUpdater(
     return () => {
       cancelled = true;
     };
-  }, [beverages, qc]);
+  }, [beverages, enabled, qc]);
 
   return failed;
+}
+
+// -------------------- Foto del costo de eventos cerrados --------------------
+
+export function useEventCostSnapshot(eventId: string | undefined) {
+  return useQuery({
+    queryKey: keys.eventSnapshot(eventId ?? ""),
+    queryFn: () => q.getEventCostSnapshot(eventId!),
+    enabled: !!eventId,
+  });
+}
+
+/** Ids de eventos que ya tienen foto. Lo usa la pantalla de backfill. */
+export function useSnapshottedEventIds() {
+  return useQuery({
+    queryKey: keys.snapshottedEvents,
+    queryFn: q.listSnapshottedEventIds,
+  });
+}
+
+/**
+ * Guarda la foto del costo. Un solo hook para los cuatro orígenes (finalizar,
+ * re-finalizar, recalcular, backfill): lo único que cambia entre ellos es
+ * `origin`, `reliable` y si además cierran el evento.
+ */
+export function useSaveEventCostSnapshot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (params: {
+      eventId: string;
+      data: EventCostSnapshotData;
+      origin: SnapshotOrigin;
+      reliable?: boolean;
+      finalize?: boolean;
+    }) => q.saveEventCostSnapshot(params),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: keys.eventSnapshot(vars.eventId) });
+      qc.invalidateQueries({ queryKey: keys.snapshottedEvents });
+      // `finalize` cambia events.status del lado del servidor, así que la
+      // fila del evento y el listado quedaron desactualizados acá.
+      if (vars.finalize) {
+        qc.invalidateQueries({ queryKey: keys.event(vars.eventId) });
+        qc.invalidateQueries({ queryKey: keys.events });
+      }
+    },
+  });
+}
+
+// --------------------------- Archivado (0020) ---------------------------
+
+export function useArchivedIngredients() {
+  return useQuery({
+    queryKey: keys.archived("ingredients"),
+    queryFn: q.listArchivedIngredients,
+  });
+}
+
+export function useArchivedRecipes() {
+  return useQuery({
+    queryKey: keys.archived("recipes"),
+    queryFn: q.listArchivedRecipes,
+  });
+}
+
+export function useArchivedProducts(providerId?: string) {
+  return useQuery({
+    queryKey: [...keys.archived("products"), providerId ?? "all"],
+    queryFn: () => q.listArchivedProducts(providerId),
+  });
+}
+
+export function useArchivedBarBeverages() {
+  return useQuery({
+    queryKey: keys.archived("bar_beverages"),
+    queryFn: q.listArchivedBarBeverages,
+  });
+}
+
+export function useArchivedLeftovers() {
+  return useQuery({
+    queryKey: keys.archived("leftovers"),
+    queryFn: q.listArchivedLeftovers,
+  });
+}
+
+/** Conteos de referencias, para saber qué archivado se puede borrar de verdad. */
+export function useReferenceCounts() {
+  return useQuery({
+    queryKey: keys.referenceCounts,
+    queryFn: q.getReferenceCounts,
+  });
+}
+
+/** El grafo de dependencias: qué evento ACTIVO usa qué. */
+export function useDependencyGraph() {
+  const events = useQuery({ queryKey: keys.events, queryFn: q.listEvents });
+  const links = useQuery({
+    queryKey: keys.eventRecipeLinks,
+    queryFn: q.listEventRecipeLinks,
+  });
+  const recipes = useQuery({
+    queryKey: keys.recipeIngredientLinks,
+    queryFn: q.listRecipeIngredientLinks,
+  });
+  // Sin filtrar por activos: un ingrediente archivado puede seguir vinculado a
+  // un producto y hay que poder decir que ese producto llega a un evento.
+  const ingredients = useQuery({
+    queryKey: keys.ingredientProductLinks,
+    queryFn: q.listIngredientProductLinks,
+  });
+
+  const ready =
+    !!events.data && !!links.data && !!recipes.data && !!ingredients.data;
+
+  return {
+    graph: ready
+      ? buildDependencyGraph({
+          events: events.data!,
+          eventRecipes: links.data!,
+          recipes: recipes.data!,
+          ingredients: ingredients.data!,
+        })
+      : null,
+    isLoading:
+      events.isLoading ||
+      links.isLoading ||
+      recipes.isLoading ||
+      ingredients.isLoading,
+  };
+}
+
+/**
+ * Todo lo que toca el estado de archivado invalida las mismas vistas: el
+ * listado vigente, el de archivados y el grafo. Centralizarlo evita que un
+ * archivado quede visible por haberse olvidado de invalidar una de las tres.
+ */
+function invalidateArchiveViews(
+  qc: ReturnType<typeof useQueryClient>,
+  entity: ArchivableEntity,
+) {
+  const live: Record<ArchivableEntity, readonly unknown[]> = {
+    ingredients: keys.ingredients,
+    recipes: keys.recipes,
+    products: keys.allProducts,
+    bar_beverages: keys.barBeverages,
+    leftovers: keys.leftovers,
+  };
+  qc.invalidateQueries({ queryKey: live[entity] });
+  qc.invalidateQueries({ queryKey: keys.archived(entity) });
+  qc.invalidateQueries({ queryKey: keys.referenceCounts });
+  if (entity === "recipes" || entity === "ingredients") {
+    qc.invalidateQueries({ queryKey: keys.recipeIngredientLinks });
+  }
+}
+
+/** Archiva o desarchiva en masa, en una sola operación atómica. */
+export function useSetRowsActive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      entity,
+      ids,
+      active,
+    }: {
+      entity: ArchivableEntity;
+      ids: string[];
+      active: boolean;
+    }) => q.setRowsActive(entity, ids, active),
+    onSuccess: (_d, vars) => invalidateArchiveViews(qc, vars.entity),
+  });
+}
+
+/** Borra definitivamente archivados sin referencias. */
+export function useDeleteArchivedRows() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      entity,
+      ids,
+    }: {
+      entity: ArchivableEntity;
+      ids: string[];
+    }) => q.deleteArchivedRows(entity, ids),
+    onSuccess: (_d, vars) => invalidateArchiveViews(qc, vars.entity),
+  });
 }
